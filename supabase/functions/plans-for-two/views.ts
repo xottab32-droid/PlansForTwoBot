@@ -273,7 +273,7 @@ function homeWidgetJson(c: Ctx, h: Awaited<ReturnType<typeof homeData>>) {
 }
 
 /** Отправка карточки-виджета; предыдущая карточка того же вида удаляется, чтобы не захламлять чат */
-async function sendCard(c: Ctx, kind: string, html: string, caption: string, data: string, keyboard: Kb | undefined, fallback: () => Promise<unknown>) {
+export async function sendCard(c: Ctx, kind: string, html: string, caption: string, data: string, keyboard: Kb | undefined, fallback: () => Promise<unknown>) {
   const prev = c.u.cards?.[kind];
   try {
     const m = await sendWidget(c.chat, html, caption, data, keyboard);

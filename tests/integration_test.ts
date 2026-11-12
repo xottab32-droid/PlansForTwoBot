@@ -312,7 +312,12 @@ Deno.test({ name: 'admin: stats + broadcasts', sanitizeOps: false, sanitizeResou
   await text('A', '/admin');
   assert(allText('A', mark).includes('Не знаю такой команды'));
   await tap('A', 'adm:s', 0);
+  await tap('A', 'adm:t', 0);
   await tap('A', 'adm:bc', 0);
+  assertEquals(calls.slice(mark).filter((c) => c.method === 'sendWidget').length, 0, 'no admin widget for regular user');
+  // запрос виджета статистики от не-админа — только ошибка, никаких цифр
+  const denied = await wq('A', 'as');
+  assertEquals(Object.keys(denied), ['err']);
   assert(!allText('A', mark).includes('Статистика') && !allText('A', mark).includes('рассылк'), 'no admin UI for regular user');
   assertEquals(calls.slice(mark).filter((c) => c.method === 'setMyCommands').length, 0);
 
@@ -325,12 +330,30 @@ Deno.test({ name: 'admin: stats + broadcasts', sanitizeOps: false, sanitizeResou
 
   // --- админ: статистика без личных данных
   mark = calls.length;
+  const markA = mark;
   await text('Z', '/admin');
+  // по умолчанию — виджет с графиками: только числа, без имён/текстов/сумм
+  const aw = calls.slice(mark).find((c) => c.method === 'sendWidget' && c.p.chat_id === 900000001)!;
+  assert(aw && aw.p.caption.includes('Статистика'), 'admin widget sent');
+  assert(new TextEncoder().encode(aw.p.chat_data).length <= 1024, 'chat_data fits');
+  const ad = JSON.parse(aw.p.chat_data);
+  assert(ad.u >= 5 && ad.d.length === 14 && /^\d{4}-\d{2}-\d{2}$/.test(ad.de), aw.p.chat_data);
+  for (const secret of ['Аня', 'Миша', 'Пушкин', 'Италии', 'Белуга', 'Дина', 'Ева', '15000', '15 000']) assert(!aw.p.chat_data.includes(secret), 'widget leak: ' + secret);
+  assert(JSON.stringify(aw.p.reply_markup).includes('adm:t'), 'text button under widget');
+  const live = await wq('Z', 'as');
+  assertEquals(live.u, ad.u);
+  assertEquals(live.fg, ad.fg);
+  // повторное /admin заменяет прошлую карточку
+  const m2 = calls.length;
+  await text('Z', '/admin');
+  assert(calls.slice(m2).some((c) => c.method === 'deleteMessage' && c.p.chat_id === 900000001 && c.p.message_id === sentIds.get(calls.indexOf(aw))), 'old admin widget removed');
+  mark = calls.length;
+  await tap('Z', 'adm:t', 0);
   const st = allText('Z', mark);
   assert(st.includes('Статистика') && st.includes('Пары:'), st);
   for (const secret of ['Аня', 'Миша', 'Пушкин', 'Италии', 'Белуга', 'Дина', 'Ева', '15 000']) assert(!st.includes(secret), 'stats leak: ' + secret);
   assert(/Запустили и забыли»: 1/.test(st), 'forgot counted:\n' + st);
-  const sc = calls.slice(mark).filter((c) => c.method === 'setMyCommands');
+  const sc = calls.slice(markA, m2).filter((c) => c.method === 'setMyCommands');
   assertEquals(sc.length, 2);
   assert(sc[1].p.scope.chat_id === 900000001 && sc[1].p.commands.some((x: any) => x.command === 'admin'));
   assert(!sc[0].p.commands.some((x: any) => x.command === 'admin') && sc[0].p.commands.some((x: any) => x.command === 'support'));

@@ -2,8 +2,10 @@
 // Ни один запрос здесь не возвращает имена, тексты событий/целей или суммы конкретных пар — только агрегаты.
 import { COMMANDS, Ctx, saveState, sendFailed, show } from './core.ts';
 import { db, Q } from './db.ts';
-import { api, b, Btn, edit, kb, Message, send, TgError } from './tg.ts';
+import { api, b, Btn, del, edit, kb, Message, send, TgError } from './tg.ts';
 import { esc, fmtNum, plural } from './util.ts';
+import { sendCard } from './views.ts';
+import { ADMIN_HTML } from './widgets.ts';
 
 // ---------- доступ ----------
 let adminCache: { ids: Set<number>; at: number } | null = null;
@@ -118,12 +120,14 @@ async function collectStats() {
       'n_wishes_done', (select count(*) from p4t.wishes where done_at is not null),
       'n_linked', (select count(*) from p4t.events where goal_id is not null or wish_id is not null),
       'reminders7', (select count(*) from p4t.sent where created_at > now() - interval '7 days'),
+      'de', (select to_char(d, 'YYYY-MM-DD') from td),
+      'at', to_char(now() at time zone 'UTC', 'DD.MM HH24:MI'),
       'daily', (select json_agg(json_build_array(to_char(g.d, 'DD.MM'), coalesce(x.users, 0), coalesce(x.hits, 0)) order by g.d)
                 from td, generate_series(td.d - 13, td.d, interval '1 day') as g(d)
                 left join (select day, count(*)::int as users, sum(hits)::int as hits from p4t.activity group by day) x on x.day = g.d::date)
     ) as s`;
   const s = r.s as Record<string, any>;
-  for (const k of Object.keys(s)) if (k !== 'daily') s[k] = Number(s[k]);
+  for (const k of Object.keys(s)) if (!['daily', 'de', 'at'].includes(k)) s[k] = Number(s[k]);
   return s;
 }
 
@@ -172,14 +176,47 @@ export function statsText(s: Record<string, any>) {
   return L.join('\n');
 }
 
-const adminKb = () => kb(
-  [b('🔄 Обновить', 'adm:s'), b('📣 Новая рассылка', 'adm:bc', 'primary')],
+const adminKb = (text: boolean) => kb(
+  [b('🔄 Обновить', text ? 'adm:t' : 'adm:s'), text ? b('📊 Графики', 'adm:s') : b('📄 Текстом', 'adm:t')],
+  [b('📣 Новая рассылка', 'adm:bc', 'primary')],
   [b('📜 История рассылок', 'adm:bl'), b('ℹ️ Как считается', 'adm:i')],
 );
 
-export async function adminHome(c: Ctx) {
+/** Компактные данные для виджета статистики: только числа (агрегаты), без имён и текстов. Влезает в лимит 1024 байт. */
+export function statsJson(s: Record<string, any>): string {
+  const daily: [string, number, number][] = s.daily ?? [];
+  return JSON.stringify({
+    u: s.users, c: s.couples,
+    n: [s.u_new1, s.u_new7, s.u_new30],
+    cs: [s.c_full, s.c_wait, s.c_empty],
+    a: [s.dau, s.wau, s.mau],
+    h: [s.hits_today, s.hits7],
+    ad: s.avg_days30, ah: s.avg_hits30,
+    fq: [s.freq_daily, s.freq_weekly, s.freq_rare],
+    pa: [s.c_act7, s.c_cool, s.c_lost], cu: s.c_used,
+    fg: [s.forgot, s.forgot_base], rt: [s.ret7, s.ret_base],
+    fn: [s.users, s.u_paired, s.u_full, s.u_content],
+    fe: [s.f_ev, s.f_goal, s.f_contr, s.f_wish, s.c_live],
+    tt: [s.n_events, s.n_goals, s.n_goals_done, s.n_contr, s.n_wishes, s.n_wishes_done, s.n_linked, s.reminders7],
+    o: [s.blocked, s.news_off, s.widgets_off, s.quiet],
+    d: daily.map((x) => [x[1], x[2]]),
+    de: s.de, at: s.at,
+  });
+}
+
+/** Ответ на запрос виджета статистики. Проверка прав — здесь, а не только в интерфейсе. */
+export async function adminWidgetQuery(tgId: number): Promise<string> {
+  if (!(await isAdmin(tgId))) return JSON.stringify({ err: 'Нет доступа' });
+  return statsJson(await collectStats());
+}
+
+/** Статистика: живой виджет с графиками (если карточки включены) или текст */
+export async function adminHome(c: Ctx, asText = false) {
   const s = await collectStats();
-  await show(c, statsText(s), adminKb());
+  const text = () => show(c, statsText(s), adminKb(true));
+  if (asText || !c.u.widgets) return await text();
+  if (c.target) { await del(c.chat, c.target); c.target = undefined; }
+  await sendCard(c, 'adm', ADMIN_HTML, '📊 <b>Статистика бота</b>\nТолько обезличенные цифры. Нажми на столбик, чтобы увидеть день.', statsJson(s), adminKb(false), text);
 }
 
 /** Команды: обычный список для всех + /admin только в чате администратора */
@@ -323,6 +360,7 @@ export async function adminCallback(c: Ctx, data: string) {
   if (act !== 'go' && act !== 'bs' && c.u.state?.f === 'bc') await saveState(c, null);
   switch (act) {
     case 's': return await adminHome(c);
+    case 't': return await adminHome(c, true);
     case 'i': return await show(c, INFO, kb([b('‹ Статистика', 'adm:s')]));
     case 'bc': return await segmentMenu(c);
     case 'bs': return SEGMENTS[arg] ? await askMessage(c, arg) : await segmentMenu(c);

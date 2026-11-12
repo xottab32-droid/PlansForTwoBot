@@ -92,3 +92,41 @@ if(S.h.length){el('div','k','Последние операции',A);S.h.forEach
 if(W)W.ready()}
 draw(W?J(W.chatData):null);if(S)bg('r:'+S.i,draw);if(W)W.onEvent('activated',()=>{if(S)bg('r:'+S.i,draw)});`,
 );
+
+// ---------- Админ: статистика (только агрегаты) ----------
+export const ADMIN_HTML = page(
+  `.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.tl{background:var(--tg-theme-secondary-bg-color);border-radius:12px;padding:8px 9px}
+.tl .v{font-weight:700;font-size:1.35em;line-height:1.15}.tl .m{font-size:.75em}.sg{display:flex;gap:4px;margin:6px 0}.sg button{flex:1;padding:5px 0;font-size:.85em}
+.sg .on{background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color)}.ch{display:flex;align-items:flex-end;gap:3px;height:96px;padding-top:4px}
+.ch div{flex:1;border-radius:4px 4px 0 0;background:linear-gradient(0deg,#ff5f8f,#ffa463);min-height:2px;transition:height .5s}.ch div.z{background:var(--tg-theme-section-separator-color)}
+.ch div.s{outline:2px solid var(--tg-theme-button-color)}.ax{display:flex;justify-content:space-between;font-size:.72em;color:var(--tg-theme-hint-color);margin-top:3px}
+.st{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--tg-theme-section-separator-color)}.st i{display:block;height:100%}
+.lg{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.8em;margin-top:5px}.lg span:before{content:'';display:inline-block;width:8px;height:8px;border-radius:4px;margin-right:4px;background:var(--c)}
+.hb{margin-top:6px}.hb .l{display:flex;justify-content:space-between;font-size:.85em}.hb .bar{height:8px;border-radius:4px}`,
+  `let MD=0,SD=-1,TB=0;const P=(a,b)=>b>0?Math.round(a/b*100):0,F=n=>String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g,' ');
+function tile(p,v,l){const t=el('div','tl',null,p);el('div','v',v,t);el('div','m',l,t)}
+function stack(p,a){const s=el('div','st',null,p),T=a.reduce((x,y)=>x+y[1],0),g=el('div','lg',null,p);a.forEach(x=>{if(T&&x[1]){const i=el('i',null,null,s);i.style.width=x[1]/T*100+'%';i.style.background=x[2]}const l=el('span',null,x[0]+' '+F(x[1]),g);l.style.setProperty('--c',x[2])})}
+function hbar(p,l,v,t){const h=el('div','hb',null,p),r=el('div','l',null,h);el('span',null,l,r);el('b',null,F(v)+(t!=null?' · '+P(v,t)+'%':''),r);const b=el('div','bar',null,h);el('i',null,null,b).style.width=(t!=null?P(v,t):100)+'%'}
+function day(i){const d=new Date(S.de+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-(13-i));return String(d.getUTCDate()).padStart(2,'0')+'.'+String(d.getUTCMonth()+1).padStart(2,'0')}
+function draw(s){if(!s)return;if(s.err&&!S){A.textContent='';el('div','e',s.err,A);return}if(s.u!=null)S=s;if(!S)return;A.textContent='';const s0=S;
+const tb=el('div','sg',null,A);['Обзор','Пары','Функции','Всего'].forEach((x,i)=>{el('button',i===TB?'on':null,x,tb).onclick=()=>{hap();TB=i;draw({})}});
+if(TB===0){const g=el('div','g3',null,A);tile(g,F(s0.u),'пользователей');tile(g,F(s0.c),'пар');tile(g,F(s0.cs[0]),'полных пар');
+el('div','k','Были в боте',A);const g2=el('div','g3',null,A);tile(g2,F(s0.a[0]),'сегодня');tile(g2,F(s0.a[1]),'за 7 дней');tile(g2,F(s0.a[2]),'за 30 дней');
+el('div','m','Новых: сегодня '+s0.n[0]+' · 7 дн. '+s0.n[1]+' · 30 дн. '+s0.n[2]+(s0.a[2]?' · DAU/MAU '+P(s0.a[0],s0.a[2])+'%':''),A);
+el('div','k','14 дней',A);const sg=el('div','sg',null,A);['Люди','Действия'].forEach((x,i)=>{el('button',i===MD?'on':null,x,sg).onclick=()=>{hap();MD=i;draw({})}});
+const v=s0.d.map(x=>x[MD]),mx=Math.max(1,...v),ch=el('div','ch',null,A);v.forEach((x,i)=>{const b=el('div',(x?'':'z')+(i===SD?' s':''),null,ch);b.style.height=Math.max(2,x/mx*100)+'%';b.onclick=()=>{hap();SD=SD===i?-1:i;draw({})}});
+const ax=el('div','ax',null,A);el('span',null,day(0),ax);el('span',null,SD<0?'макс '+mx:day(SD)+': '+s0.d[SD][0]+' чел. · '+s0.d[SD][1]+' действий',ax);el('span',null,day(13),ax)}
+if(TB===1){el('div','k','Полные пары по активности',A);stack(A,[['≤7 дн.',s0.pa[0],'#34c759'],['8–30 дн.',s0.pa[1],'#ffcc00'],['30+ дн.',s0.pa[2],'#ff3b30']]);
+el('div','m','Пользуются (есть записи): '+s0.cu+' из '+s0.cs[0]+' · ждут партнёра '+s0.cs[1]+' · распались '+s0.cs[2],A);
+el('div','k','Частота за 30 дней',A);stack(A,[['почти каждый день',s0.fq[0],'#34c759'],['каждую неделю',s0.fq[1],'#5ac8fa'],['изредка',s0.fq[2],'#8e8e93']]);
+el('div','m','В среднем '+s0.ad+' дн. с ботом, ~'+s0.ah+' действий в такой день',A);
+el('div','k','Удержание',A);const g3=el('div','g3',null,A);tile(g3,P(s0.fg[0],s0.fg[1])+'%','запустили и забыли ('+s0.fg[0]+' из '+s0.fg[1]+')');
+tile(g3,s0.rt[1]?P(s0.rt[0],s0.rt[1])+'%':'—','вернулись через неделю');tile(g3,F(s0.h[1]),'действий за 7 дней')}
+if(TB===2){el('div','k','Воронка',A);const fn=s0.fn;[['Запустили',fn[0]],['В паре',fn[1]],['Полная пара',fn[2]],['Есть записи',fn[3]]].forEach(x=>hbar(A,x[0],x[1],fn[0]));
+el('div','k','Функции · доля пар из '+s0.fe[4],A);[['📅 События',0],['🎯 Цели',1],['💰 Пополнения',2],['📍 Хочу сходить',3]].forEach(x=>hbar(A,x[0],s0.fe[x[1]],s0.fe[4]))}
+if(TB===3){const t=s0.tt,g4=el('div','g3',null,A);tile(g4,F(t[0]),'событий');tile(g4,F(t[1]),'целей, достигнуто '+t[2]);tile(g4,F(t[3]),'операций по целям');
+tile(g4,F(t[4]),'мест, посетили '+t[5]);tile(g4,F(t[6]),'связей с событиями');tile(g4,F(t[7]),'напоминаний за 7 дн.');
+el('div','k','Настройки и отток',A);const g5=el('div','g3',null,A);tile(g5,F(s0.o[0]),'заблокировали');tile(g5,F(s0.o[1]),'без новостей');tile(g5,F(s0.o[2]+s0.o[3]),'без карточек / звука')}
+el('div','m','Обновлено '+s0.at+' UTC · только обезличенные цифры',A).style.marginTop='10px';if(W)W.ready()}
+draw(W?J(W.chatData):null);bg('as',draw);if(W)W.onEvent('activated',()=>bg('as',draw));`,
+);

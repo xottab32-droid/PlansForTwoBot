@@ -211,10 +211,20 @@ async function newsToggle(c: Ctx, on: boolean, messageId: number) {
 
 async function onWidget(q: WidgetQuery) {
   if (!q.chat || q.chat.type !== 'private') return await answerWidget(q.id, JSON.stringify({ err: 'Доступно только в личном чате с ботом' }));
+  const data = String(q.data ?? '').slice(0, 64);
+  // Виджет админ-статистики: отвечаем до проверки пары, права проверяются внутри (не-админ получит только ошибку)
+  if (data === 'as') {
+    let ans: string;
+    try { ans = await A.adminWidgetQuery(q.from.id); } catch (e) {
+      console.error('admin widget query failed', String(e));
+      ans = JSON.stringify({ err: 'Ошибка, попробуй ещё раз' });
+    }
+    return await answerWidget(q.id, ans);
+  }
   const c = await loadCtx(q.from, q.chat.id);
   let res: Awaited<ReturnType<typeof V.widgetQuery>>;
   try {
-    res = await V.widgetQuery(c, String(q.data ?? '').slice(0, 64));
+    res = await V.widgetQuery(c, data);
   } catch (e) {
     console.error('widget query failed', String(e));
     res = { answer: JSON.stringify({ err: 'Ошибка, попробуй ещё раз' }) };
