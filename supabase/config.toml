@@ -1,0 +1,4 @@
+project_id = "plans-for-two"
+
+[functions.plans-for-two]
+verify_jwt = false

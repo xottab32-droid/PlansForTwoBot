@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "strict": true, "noImplicitAny": false },
+  "lint": { "rules": { "exclude": ["no-explicit-any", "no-import-prefix"] } }
+}
