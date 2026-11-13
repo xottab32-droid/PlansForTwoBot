@@ -235,6 +235,18 @@ async function onWidget(q: WidgetQuery) {
     console.error('widget query failed', String(e));
     res = { answer: JSON.stringify({ err: 'Ошибка, попробуй ещё раз' }) };
   }
+  // Переход из главного виджета должен подтвердить реальную отправку карточки,
+  // а не сразу вернуть {}, оставив пользователя без обратной связи.
+  if (data === 'o:p' && res.after) {
+    try {
+      await dropWizard(c);
+      const sent = await res.after();
+      return await answerWidget(q.id, JSON.stringify({ opened: sent === true ? 'widget' : 'list' }));
+    } catch (e) {
+      console.error('home gifts navigation failed', String(e));
+      return await answerWidget(q.id, JSON.stringify({ err: 'Не удалось открыть подарки. Используй /gifts.' }));
+    }
+  }
   await answerWidget(q.id, res.answer);
   if (res.after) {
     await dropWizard(c);
