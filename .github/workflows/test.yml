@@ -1,0 +1,34 @@
+name: Verify fixes without deployment
+on:
+  push:
+    branches: [fix/reliable-webhooks-reminders-pagination]
+  pull_request:
+
+jobs:
+  deno-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check supabase/functions/plans-for-two/index.ts tests/integration_test.ts
+      - run: deno lint supabase/functions/plans-for-two
+      - run: deno test supabase/functions/plans-for-two/util_test.ts
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase start
+      - name: Integration tests against local Supabase, never production
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          PLANS_BOT_TOKEN: test
+        run: deno test -A tests/integration_test.ts
