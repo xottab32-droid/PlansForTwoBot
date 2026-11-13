@@ -1,0 +1,49 @@
+name: Verify fixes without deployment
+on:
+  push:
+    branches: [fix/reliable-webhooks-reminders-pagination]
+  pull_request:
+
+jobs:
+  deno-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check supabase/functions/plans-for-two/index.ts tests/integration_test.ts
+      - run: deno lint supabase/functions/plans-for-two
+      - run: deno test supabase/functions/plans-for-two/util_test.ts
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Start local PostgreSQL (no production connection or Docker image pull)
+        run: |
+          sudo systemctl start postgresql
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "alter user postgres with password 'postgres';"
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "create role anon; create role authenticated; create role service_role;"
+      - name: Apply app schema and local cron stubs
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -e
+          for migration in \
+            supabase/migrations/20261112190000_p4t_init.sql \
+            tests/ci_cron_stub.sql \
+            supabase/migrations/20261113100000_p4t_admin.sql \
+            supabase/migrations/20261114100000_p4t_display_name.sql \
+            supabase/migrations/20261115100000_p4t_function_url.sql \
+            supabase/migrations/20261116100000_p4t_delivery_reliability.sql; do
+            psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Integration tests against local PostgreSQL only
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          PLANS_BOT_TOKEN: test
+        run: deno test -A tests/integration_test.ts

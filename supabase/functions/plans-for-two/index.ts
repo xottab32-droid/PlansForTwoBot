@@ -1,6 +1,7 @@
 // Edge Function plans-for-two: webhook бота, напоминания (?cron), рассылки (?broadcast), первичная настройка (?bootstrap)
 import { handleUpdate } from './bot.ts';
-import { runReminders } from './cron.ts';
+import { runReminders, deliverPending } from './cron.ts';
+import { processUpdate } from './updates.ts';
 import { db } from './db.ts';
 import { api, Update } from './tg.ts';
 import { COMMANDS } from './core.ts';
@@ -57,6 +58,12 @@ Deno.serve(async (req) => {
       const n = await runReminders();
       return txt(`sent ${n}`);
     }
+    if (url.searchParams.has('deliver')) {
+      const secret = await cfg('cron_secret');
+      if (!secret || !safeEq(req.headers.get('x-cron-secret') ?? '', secret)) return txt('forbidden', 403);
+      const n = await deliverPending();
+      return txt(`delivered ${n}`);
+    }
     if (url.searchParams.has('broadcast')) {
       const secret = await cfg('cron_secret');
       if (!secret || !safeEq(req.headers.get('x-cron-secret') ?? '', secret)) return txt('forbidden', 403);
@@ -67,16 +74,12 @@ Deno.serve(async (req) => {
     if (!secret || !safeEq(req.headers.get('x-telegram-bot-api-secret-token') ?? '', secret)) return txt('forbidden', 403);
     const up = (await req.json()) as Update;
     if (typeof up?.update_id !== 'number') return txt('ok');
-    const fresh = await db()`insert into p4t.updates (update_id) values (${up.update_id}) on conflict do nothing returning update_id`;
-    if (!fresh.length) return txt('dup');
-    try {
-      await handleUpdate(up);
-    } catch (e) {
-      console.error(JSON.stringify({ update_failed: up.update_id, error: String(e), stack: (e as Error)?.stack }));
-    }
-    return txt('ok');
+    const result = await processUpdate(up, handleUpdate);
+    // Telegram повторяет webhook только при не-2xx. Не подтверждаем недоставленное обновление.
+    if (result === 'retry') return txt('retry', 503);
+    return txt(result === 'duplicate' ? 'dup' : 'ok');
   } catch (e) {
     console.error(JSON.stringify({ request_failed: String(e) }));
-    return txt('error', 200);
+    return txt('error', 500);
   }
 });

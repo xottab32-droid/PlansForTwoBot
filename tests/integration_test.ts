@@ -2,13 +2,16 @@
 // Запуск: SUPABASE_DB_URL=postgres://... PLANS_BOT_TOKEN=test deno test -A tests/integration_test.ts
 import { assert, assertEquals } from 'jsr:@std/assert@1';
 import { handleUpdate } from '../supabase/functions/plans-for-two/bot.ts';
-import { runReminders } from '../supabase/functions/plans-for-two/cron.ts';
+import { runReminders, deliverPending } from '../supabase/functions/plans-for-two/cron.ts';
+import { processUpdate } from '../supabase/functions/plans-for-two/updates.ts';
+import { addDays, localNow } from '../supabase/functions/plans-for-two/util.ts';
 import { closeDb, db, inCouple } from '../supabase/functions/plans-for-two/db.ts';
 import { pending } from '../supabase/functions/plans-for-two/admin.ts';
 
 type Call = { method: string; p: any };
 const calls: Call[] = [];
 let mid = 1000;
+let failNextReminder = false;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = String(input);
@@ -18,6 +21,11 @@ globalThis.fetch = (async (input: any, init?: any) => {
   calls.push({ method, p });
   if (method === 'copyMessage' && p.chat_id === 333) {
     return new Response(JSON.stringify({ ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }), { status: 403 });
+  }
+  if (method === 'sendMessage' && failNextReminder && p.chat_id === 222 &&
+      String(p.text ?? '').includes('Контроль повторной доставки')) {
+    failNextReminder = false;
+    return new Response(JSON.stringify({ ok: false, error_code: 502, description: 'Temporary Telegram failure' }), { status: 502 });
   }
   let result: any = true;
   if (method === 'copyMessage') result = { message_id: ++mid };
@@ -214,6 +222,58 @@ Deno.test({ name: 'full flow + isolation', sanitizeOps: false, sanitizeResources
   assert(!allText('C', mark).includes('Пушкин'), 'no cross-couple reminders');
   const n2 = await runReminders();
   assertEquals(n2, 0, 'no duplicates');
+  // --- Повторяемые webhook updates: ошибка -> retry -> done -> duplicate
+  const checkId = 987654321;
+  let handled = 0;
+  await sql`delete from p4t.updates where update_id = ${checkId}`;
+  const sample = { update_id: checkId };
+  assertEquals(await processUpdate(sample, async () => { handled++; throw new Error('expected test failure'); }), 'retry');
+  assertEquals((await sql`select status from p4t.updates where update_id = ${checkId}`)[0].status, 'retry');
+  assertEquals(await processUpdate(sample, async () => { handled++; }), 'done');
+  assertEquals(await processUpdate(sample, async () => { handled++; }), 'duplicate');
+  assertEquals(handled, 2, 'processed only until success');
+
+  // --- 502 от Telegram не должна терять напоминание для второго участника.
+  const tomorrow = addDays(localNow('Europe/Moscow').date, 1);
+  await sql`insert into p4t.events (couple_id, kind, title, event_date, created_by)
+    values (${ca}, 'important', 'Контроль повторной доставки', ${tomorrow}, 111)`;
+  failNextReminder = true;
+  await runReminders();
+  const delivery1 = await sql`select tg_id::int as tg_id, status from p4t.reminder_deliveries
+    where body like '%Контроль повторной доставки%' order by tg_id`;
+  assertEquals(delivery1.map((r: any) => [r.tg_id, r.status]), [[111, 'sent'], [222, 'pending']]);
+  await sql`update p4t.reminder_deliveries set next_attempt_at = now() - interval '1 minute'
+    where body like '%Контроль повторной доставки%' and status = 'pending'`;
+  await deliverPending();
+  const delivery2 = await sql`select tg_id::int as tg_id, status from p4t.reminder_deliveries
+    where body like '%Контроль повторной доставки%' order by tg_id`;
+  assertEquals(delivery2.map((r: any) => [r.tg_id, r.status]), [[111, 'sent'], [222, 'sent']]);
+
+
+  // Запуск на заданную будущую дату использует эту дату и в SQL-отборе пар.
+  const simulatedNow = new Date(Date.now() + 45 * 86400000);
+  const simulatedTomorrow = addDays(localNow('Europe/Moscow', simulatedNow).date, 1);
+  await sql`insert into p4t.events (couple_id, kind, title, event_date, created_by)
+    values (${ca}, 'important', 'Симулированное напоминание', ${simulatedTomorrow}, 111)`;
+  await runReminders(simulatedNow);
+  const simulatedDelivery = await sql`select tg_id::int as tg_id, status from p4t.reminder_deliveries
+    where body like '%Симулированное напоминание%' order by tg_id`;
+  assertEquals(simulatedDelivery.map((r: any) => [r.tg_id, r.status]), [[111, 'sent'], [222, 'sent']]);
+
+  // --- Цели/места не обрезаются после восьмой записи и дают перейти на следующую страницу.
+  for (let i = 0; i < 12; i++) {
+    await sql`insert into p4t.goals (couple_id, title, target, created_by)
+      values (${ca}, ${'Тестовая цель ' + i}, 1000, 111)`;
+    await sql`insert into p4t.wishes (couple_id, title, created_by)
+      values (${ca}, ${'Тестовое место ' + i}, 111)`;
+  }
+  const startPaging = calls.length;
+  await tap('A', 'gl:0:1', 0);
+  assert(allText('A', startPaging).includes('страница 2/'), 'second goal page');
+  const wishPaging = calls.length;
+  await tap('A', 'wl:all:1', 0);
+  assert(allText('A', wishPaging).includes('Страница 2/'), 'second wishlist page');
+
 
   // --- остальные экраны не падают
   for (const k of ['nav:home', 'nav:cal', 'nav:goals', 'nav:wish', 'nav:add', 'nav:set', 'nav:help', 'up:0', 'pa:0', 'gl:1', 'wl:all:0', 'wd:all:0', 'wi:rnd',

@@ -153,7 +153,7 @@ async function route(c: Ctx, data: string) {
       return;
     case 'up': return await V.upcomingList(c, Number(p[1]) || 0);
     case 'pa': return await V.upcomingList(c, Number(p[1]) || 0, true);
-    case 'gl': return await V.goalsList(c, p[1] === '1');
+    case 'gl': return await V.goalsList(c, p[1] === '1', Number(p[2]) || 0);
     case 'wl': return await V.wishList(c, p[1] ?? 'all', Number(p[2]) || 0);
     case 'wd': return await V.wishList(c, p[1] ?? 'all', Number(p[2]) || 0, true);
     case 's': return await V.settingsAction(c, p[1], p[2]);
