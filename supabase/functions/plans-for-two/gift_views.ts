@@ -1,7 +1,7 @@
 // Желания и подарки. Желание видит вся пара, менять — только владелец.
 // Отметки дарителя («выбрал», «купил») лежат в p4t.gift_plans: RLS отдаёт их только самому дарителю,
 // поэтому владелец не увидит их ни в тексте, ни в виджете, даже если в коде ошибка в фильтре.
-import { Ctx, inC, memberName, nameOf, notifyPartner, partner, PRIO, sendFailed, show, WS } from './core.ts';
+import { Ctx, inC, memberName, nameOf, notifyPartner, partner, PRIO, GIFT_CATS, GIFT_OCCASIONS, sendFailed, show, WS } from './core.ts';
 import { db, num, Q } from './db.ts';
 import { b, Btn, del, kb, send, u } from './tg.ts';
 import { cut, daysBetween, esc, fitJson, fmtMoney, fmtShort, nextOccurrence, plural, untilText } from './util.ts';
@@ -12,6 +12,7 @@ import { sendCard } from './views.ts';
 
 type Gift = {
   id: number; owner_id: number; title: string; price: number | null; priority: number; url: string | null; note: string | null;
+  category: string; occasion: string;
   received_at: Date | null; given_by: number | null; created_at: Date;
   /** отметка текущего пользователя (только на чужих желаниях) */
   st: 'picked' | 'bought' | null;
@@ -19,6 +20,9 @@ type Gift = {
 type W = 'm' | 'p';
 const ST_NAME = { picked: '🤫 выбрано', bought: '🛍 куплено' } as const;
 const PER = 8;
+const budgetChoices = (c: Ctx): number[] => c.couple?.currency === '₽' ? [5000, 15000, 30000] : [50, 150, 300];
+const categoryText = (g: Gift) => GIFT_CATS[g.category]?.join(' ') ?? GIFT_CATS.other.join(' ');
+const occasionText = (g: Gift) => GIFT_OCCASIONS[g.occasion]?.join(' ') ?? GIFT_OCCASIONS.any.join(' ');
 const pe = (g: { priority: number }) => PRIO[g.priority]?.[0] ?? '🙂';
 const shortTs = (d: Date, tz: string) => new Intl.DateTimeFormat('ru-RU', { timeZone: tz, day: 'numeric', month: 'short' }).format(new Date(d)).replace('.', '');
 const notFound = (c: Ctx) => show(c, '🤷 Желание не найдено — возможно, его удалили.', kb([b('🎁 Подарки', 'gf:l:m:0'), b('🏠 Главная', 'nav:home')]));
@@ -33,11 +37,12 @@ function mapGift(c: Ctx, r: any): Gift {
   };
 }
 
-async function giftsOf(c: Ctx, tx: Q, owner: number, received: boolean, limit: number, offset = 0): Promise<Gift[]> {
+async function giftsOf(c: Ctx, tx: Q, owner: number, received: boolean, limit: number, offset = 0, budget = 0): Promise<Gift[]> {
   const rows = await tx`
-    select g.id, g.owner_id, g.title, g.price, g.priority, g.url, g.note, g.received_at, g.given_by, g.created_at, p.status as st
+    select g.id, g.owner_id, g.title, g.price, g.priority, g.category, g.occasion, g.url, g.note, g.received_at, g.given_by, g.created_at, p.status as st
     from p4t.gifts g left join p4t.gift_plans p on p.gift_id = g.id
     where g.owner_id = ${owner} and (g.received_at is not null) = ${received}
+      and (${budget} = 0 or (g.price is not null and g.price <= ${budget}))
     order by case when ${received} then g.received_at end desc nulls last, g.priority, g.created_at desc, g.id desc
     limit ${limit} offset ${offset}`;
   return rows.map((r: any) => mapGift(c, r));
@@ -117,7 +122,7 @@ export async function giftList(c: Ctx, w: W, page = 0, received = false) {
   }
   for (const g of list) {
     const pr = priceText(c, g);
-    L.push(`${received ? '🎉' : pe(g)} ${esc(cut(g.title, 60))}${pr ? ' · ' + pr : ''}${g.st ? ' · ' + ST_NAME[g.st] : ''}`);
+    L.push(`${received ? '🎉' : pe(g)} ${GIFT_CATS[g.category]?.[0] ?? '🎁'} ${esc(cut(g.title, 60))}${pr ? ' · ' + pr : ''}${g.st ? ' · ' + ST_NAME[g.st] : ''}`);
   }
   const pf = received ? 'gf:r' : 'gf:l';
   const rows: Btn[][] = list.map((g) => [b(`${received ? '🎉' : pe(g)} ${cut(g.title, 32)}${g.st === 'picked' ? ' 🤫' : g.st === 'bought' ? ' 🛍' : ''}`, `gf:o:${g.id}`)]);
@@ -127,6 +132,7 @@ export async function giftList(c: Ctx, w: W, page = 0, received = false) {
   ].filter(Boolean) as Btn[]);
   if (p && !received) rows.push([b(w === 'm' ? '• 🙋 Мои' : '🙋 Мои', 'gf:l:m:0'), b(`${w === 'p' ? '• ' : ''}💞 ${cut(p.first_name, 20)}`, 'gf:l:p:0')]);
   if (!received && w === 'm') rows.push([b('➕ Добавить желание', 'add:gift', 'primary')]);
+  if (!received && w === 'p') rows.push([b('🎲 Подобрать по бюджету', 'gf:budget')]);
   rows.push([received ? b('‹ К списку', `gf:l:${w}:0`) : b(`🎉 ${w === 'm' ? 'Мне подарили' : 'Уже подарено'}`, `gf:r:${w}:0`), b('🏠 Главная', 'nav:home')]);
   await show(c, L.join('\n'), kb(...rows));
 }
@@ -135,7 +141,7 @@ export async function giftList(c: Ctx, w: W, page = 0, received = false) {
 
 async function giftById(c: Ctx, tx: Q, id: number): Promise<Gift | null> {
   const [r] = await tx`
-    select g.id, g.owner_id, g.title, g.price, g.priority, g.url, g.note, g.received_at, g.given_by, g.created_at, p.status as st
+    select g.id, g.owner_id, g.title, g.price, g.priority, g.category, g.occasion, g.url, g.note, g.received_at, g.given_by, g.created_at, p.status as st
     from p4t.gifts g left join p4t.gift_plans p on p.gift_id = g.id where g.id = ${id}`;
   return r ? mapGift(c, r) : null;
 }
@@ -149,6 +155,8 @@ export async function giftCard(c: Ctx, id: number, notice = '') {
   if (notice) L.push(notice, '');
   L.push(`${g.received_at ? '🎉' : pe(g)} <b>${esc(g.title)}</b>`, `<i>${PRIO[g.priority]?.[1] ?? ''}</i>`);
   if (g.price) L.push('', `💰 Примерно ${priceText(c, g)}`);
+  L.push(`📂 ${categoryText(g)}`);
+  if (g.occasion !== 'any') L.push(`📅 ${occasionText(g)}`);
   if (g.note) L.push(`📝 ${esc(g.note)}`);
   if (g.url) L.push(`🔗 ${esc(cut(g.url, 60))}`);
   L.push('', mine ? `🙋 Твоё желание · добавлено ${shortTs(g.created_at, c.couple!.tz)}` : `💞 Желание: ${owner} · добавлено ${shortTs(g.created_at, c.couple!.tz)}`);
@@ -179,23 +187,25 @@ export async function giftCard(c: Ctx, id: number, notice = '') {
 
 export async function addGift(c: Ctx) {
   if (!c.couple) return await onboarding(c);
-  await startWizard(c, 'gift', { prio: '2' });
+  await startWizard(c, 'gift', { prio: '2', cat: 'other', occasion: 'any' });
 }
 
 export async function finishGift(c: Ctx, s: WS) {
   const d = s.d;
   const prio = [1, 2, 3].includes(Number(d.prio)) ? Number(d.prio) : 2;
+  const category = GIFT_CATS[d.cat] ? String(d.cat) : 'other';
+  const occasion = GIFT_OCCASIONS[d.occasion] ? String(d.occasion) : 'any';
   const price = d.price ? Number(d.price) : null;
   const url = d.url && /^https?:\/\/\S+$/i.test(d.url) ? String(d.url) : null;
   if (s.id) {
-    const r = await inC(c, (tx) => tx`update p4t.gifts set title = ${d.title}, price = ${price}, priority = ${prio}, url = ${url},
+    const r = await inC(c, (tx) => tx`update p4t.gifts set title = ${d.title}, price = ${price}, priority = ${prio}, category = ${category}, occasion = ${occasion}, url = ${url},
       note = ${d.note ?? null}, updated_at = now() where id = ${s.id} and owner_id = ${c.u.tg_id} and received_at is null returning id`);
     if (!r.length) return await notFound(c);
     return await giftCard(c, s.id, '✅ Сохранено.');
   }
   const id = await inC(c, async (tx) => {
-    const [r] = await tx`insert into p4t.gifts (couple_id, owner_id, title, price, priority, url, note)
-      values (${c.couple!.id}, ${c.u.tg_id}, ${d.title}, ${price}, ${prio}, ${url}, ${d.note ?? null}) returning id`;
+    const [r] = await tx`insert into p4t.gifts (couple_id, owner_id, title, price, priority, category, occasion, url, note)
+      values (${c.couple!.id}, ${c.u.tg_id}, ${d.title}, ${price}, ${prio}, ${category}, ${occasion}, ${url}, ${d.note ?? null}) returning id`;
     return Number(r.id);
   });
   const pr = price ? ' · ' + fmtMoney(price, c.couple!.currency) : '';
@@ -214,16 +224,17 @@ export async function giftEditMenu(c: Ctx, id: number) {
   if (!g || g.received_at) return await notFound(c);
   await show(c, `✏️ <b>${esc(g.title)}</b>\nЧто изменить?`, kb(
     [b('Название', `gf:ef:${id}:title`), b('Цену', `gf:ef:${id}:price`), b('Насколько хочется', `gf:ef:${id}:prio`)],
+    [b('Категорию', `gf:ef:${id}:cat`), b('Повод', `gf:ef:${id}:occasion`)],
     [b('Ссылку', `gf:ef:${id}:url`), b('Заметку', `gf:ef:${id}:note`)],
     [b('‹ Назад', `gf:o:${id}`)],
   ));
 }
 
 export async function giftEditField(c: Ctx, id: number, field: string) {
-  if (!['title', 'price', 'prio', 'url', 'note'].includes(field)) return;
+  if (!['title', 'price', 'prio', 'url', 'note', 'cat', 'occasion'].includes(field)) return;
   const g = await ownGift(c, id);
   if (!g || g.received_at) return await notFound(c);
-  await startWizard(c, 'gift', { title: g.title, price: g.price, prio: String(g.priority), url: g.url, note: g.note }, { only: field, id });
+  await startWizard(c, 'gift', { title: g.title, price: g.price, prio: String(g.priority), cat: g.category, occasion: g.occasion, url: g.url, note: g.note }, { only: field, id });
 }
 
 // ============================== Тайные отметки и «подарил» ==============================
@@ -315,8 +326,42 @@ export async function giftDelete(c: Ctx, id: number) {
   await giftList(c, 'm', 0, !!g.received_at);
 }
 
+/** Подбор подарка из неисполненных желаний партнёра, без уже выбранных. */
+export async function giftRandom(c: Ctx, budget = 0) {
+  if (!c.couple) return await onboarding(c);
+  const recipient = partner(c);
+  if (!recipient) return await show(c, 'Пригласи партнёра, чтобы подбирать подарки.', kb([b('🏠 Главная', 'nav:home')]));
+  if (budget < 0 || !Number.isFinite(budget)) return;
+  const [r] = await inC(c, (tx) => tx`
+    select g.id from p4t.gifts g
+    where g.owner_id = ${recipient.tg_id} and g.received_at is null
+      and (${budget} = 0 or (g.price is not null and g.price <= ${budget}))
+      and not exists (select 1 from p4t.gift_plans plan where plan.gift_id = g.id)
+    order by random() limit 1`);
+  if (!r) return await show(c, 'Подходящих свободных желаний не нашлось. Попробуй другой бюджет или загляни позже.',
+    kb([b('🎲 Другой бюджет', 'gf:budget'), b('🎁 Все желания', 'gf:l:p:0')]));
+  await giftCard(c, Number(r.id), budget
+    ? `🎲 Идея для подарка до ${fmtMoney(budget, c.couple.currency)}`
+    : '🎲 Идея для подарка');
+}
+
+export async function giftBudgetMenu(c: Ctx) {
+  if (!c.couple) return await onboarding(c);
+  const nums = budgetChoices(c);
+  await show(c, '🎲 <b>Выбери бюджет</b>\nБот случайно предложит одно ещё не выбранное желание партнёра.',
+    kb([b('Любой бюджет', 'gf:rnd:0')],
+      nums.map((n) => b('До ' + fmtMoney(n, c.couple!.currency), 'gf:rnd:' + n)),
+      [b('‹ К желаниям', 'gf:l:p:0')]));
+}
+
 /** Маршрутизация кнопок gf:* */
 export async function giftRoute(c: Ctx, p: string[]) {
+  if (p[1] === 'budget') return await giftBudgetMenu(c);
+  if (p[1] === 'rnd') {
+    const budget = Number(p[2]) || 0;
+    if (budget !== 0 && !budgetChoices(c).includes(budget)) return;
+    return await giftRandom(c, budget);
+  }
   const w: W = p[2] === 'p' ? 'p' : 'm';
   if (p[1] === 'l') return await giftList(c, w, Number(p[3]) || 0);
   if (p[1] === 'r') return await giftList(c, w, Number(p[3]) || 0, true);
@@ -341,20 +386,28 @@ export async function giftRoute(c: Ctx, p: string[]) {
 const ST_CODE = { picked: 1, bought: 2 } as const;
 
 /** Данные виджета собираются под конкретного зрителя: на своих желаниях отметок нет вовсе */
-export async function giftJson(c: Ctx, err?: string) {
+export async function giftJson(c: Ctx, err?: string, budget = 0) {
   const p = partner(c);
   const cur = c.couple!.currency;
   const d = await inC(c, async (tx) => ({
     mine: await giftsOf(c, tx, c.u.tg_id, false, 6), km: await counts(tx, c.u.tg_id), bm: await birthday(c, tx, c.u.tg_id),
-    theirs: p ? await giftsOf(c, tx, p.tg_id, false, 6) : [], kp: p ? await counts(tx, p.tg_id) : null, bp: p ? await birthday(c, tx, p.tg_id) : null,
+    theirs: p ? await giftsOf(c, tx, p.tg_id, false, 6, 0, budget) : [],
+    kp: p ? await counts(tx, p.tg_id) : null, bp: p ? await birthday(c, tx, p.tg_id) : null,
+    filtered: p && budget > 0 ? Number((await tx`
+      select count(*)::int as n from p4t.gifts where owner_id = ${p.tg_id}
+        and received_at is null and price is not null and price <= ${budget}`)[0].n) : null,
   }));
   const pr = (g: Gift) => g.price ? `${fmtShort(g.price)} ${cur}` : '';
+  const label = (g: Gift, max: number) => cut(g.title, max) + (g.occasion !== 'any' ? ' ' + (GIFT_OCCASIONS[g.occasion]?.[0] ?? '') : '');
+  const icon = (g: Gift) => pe(g) + (GIFT_CATS[g.category]?.[0] ?? '');
   const o: any = {
     b: p ? p.first_name.slice(0, 24) : null,
-    m: [occText(c, 'm', d.bm).slice(0, 60), d.km.n, d.mine.map((g) => [g.id, pe(g), cut(g.title, 28), pr(g)])],
+    q: budgetChoices(c), f: budget,
+    m: [occText(c, 'm', d.bm).slice(0, 60), d.km.n, d.mine.map((g) => [g.id, icon(g), label(g, 24), pr(g)])],
     p: p && d.kp ? [
-      [occText(c, 'p', d.bp), d.kp.n ? planText(d.kp) : ''].filter(Boolean).join(' · ').slice(0, 90), d.kp.n,
-      d.theirs.map((g) => [g.id, pe(g), cut(g.title, 24), pr(g), g.st ? ST_CODE[g.st] : 0]),
+      [occText(c, 'p', d.bp), d.kp.n ? planText(d.kp) : ''].filter(Boolean).join(' · ').slice(0, 90),
+      d.filtered ?? d.kp.n,
+      d.theirs.map((g) => [g.id, icon(g), label(g, 22), pr(g), g.st ? ST_CODE[g.st] : 0]),
     ] : null,
   };
   if (err) o.err = err;
@@ -365,6 +418,18 @@ export async function giftWidgetQuery(c: Ctx, data: string): Promise<{ answer: s
   let m: RegExpExecArray | null;
   if (data === 'gw') return { answer: await giftJson(c) };
   if (data === 'ga') return { answer: '{}', after: () => addGift(c) };
+  if ((m = /^gb:(\d{1,7})$/.exec(data))) {
+    const budget = Number(m[1]);
+    return budget === 0 || budgetChoices(c).includes(budget)
+      ? { answer: await giftJson(c, undefined, budget) }
+      : { answer: JSON.stringify({ err: 'Недопустимый бюджет' }) };
+  }
+  if ((m = /^gx:(\d{1,7})$/.exec(data))) {
+    const budget = Number(m[1]);
+    return budget === 0 || budgetChoices(c).includes(budget)
+      ? { answer: '{}', after: () => giftRandom(c, budget) }
+      : { answer: JSON.stringify({ err: 'Недопустимый бюджет' }) };
+  }
   if ((m = /^gl:([mp])$/.exec(data))) return { answer: '{}', after: () => giftList(c, m![1] as W, 0) };
   if ((m = /^go:(\d{1,12})$/.exec(data))) return { answer: '{}', after: () => giftCard(c, Number(m![1])) };
   if ((m = /^gs:(\d{1,12}):([pbn])$/.exec(data))) {

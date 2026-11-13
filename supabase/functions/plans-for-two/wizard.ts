@@ -1,5 +1,5 @@
 // Пошаговый ввод в одной карточке: бот редактирует одно сообщение, введённый текст удаляется.
-import { cleanName, Ctx, CATS, GOAL_EMOJI, KINDS, nameOf, partner, PRIO, saveState, show, WS } from './core.ts';
+import { cleanName, Ctx, CATS, GOAL_EMOJI, KINDS, nameOf, partner, PRIO, GIFT_CATS, GIFT_OCCASIONS, saveState, show, WS } from './core.ts';
 import { b, Btn, del, kb } from './tg.ts';
 import { addDays, esc, fmtDate, fmtMoney, isoOf, MONTHS, parseAmount, parseDate, parseEmoji, parseTime, quickAmounts, WD, weekday, daysInMonth } from './util.ts';
 import * as V from './views.ts';
@@ -97,6 +97,14 @@ const GIFT_STEPS: Step[] = [
     check: (v) => /^https?:\/\/\S+$/i.test(String(v)) ? null : 'Нужна ссылка, начинающаяся с https://' },
   { key: 'note', label: 'Заметка', type: 'text', max: 500, optional: () => true,
     q: () => 'Уточнения? Размер, цвет, модель, «не дороже 5000». Можно пропустить.' },
+  { key: 'cat', label: 'Категория', type: 'choice', optional: () => true,
+    q: () => 'Категория подарка? Можно пропустить.',
+    opts: () => Object.entries(GIFT_CATS).map(([k, [emoji, title]]) => [emoji + ' ' + title, k]),
+    show: (v) => GIFT_CATS[v]?.join(' ') ?? 'Другое' },
+  { key: 'occasion', label: 'Повод', type: 'choice', optional: () => true,
+    q: () => 'К какому поводу хочется подарок? Можно пропустить.',
+    opts: () => Object.entries(GIFT_OCCASIONS).map(([k, [emoji, title]]) => [emoji + ' ' + title, k]),
+    show: (v) => GIFT_OCCASIONS[v]?.join(' ') ?? 'Без повода' },
 ];
 
 const JOIN_STEPS: Step[] = [
