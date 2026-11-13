@@ -10,28 +10,42 @@ const navRow = (...extra: Btn[]): Btn[] => [...extra, b('🏠 Главная', '
 
 export async function wishList(c: Ctx, cat = 'all', page = 0, done = false) {
   if (!c.couple) return await onboarding(c);
+  if (cat !== 'all' && !CATS[cat]) cat = 'all';
+  const per = 8;
+  const [count] = await inC(c, (tx) => tx`
+    select count(*)::int as n from p4t.wishes
+    where (done_at is not null) = ${done} and (${cat === 'all'} or category = ${cat})`);
+  const total = Number(count.n);
+  const pages = Math.max(1, Math.ceil(total / per));
+  page = Math.min(Math.max(0, Math.floor(page) || 0), pages - 1);
   const rows = await inC(c, (tx) => tx`
     select w.id, w.category, w.title, w.done_at,
       (select min(e.event_date)::text from p4t.events e where e.wish_id = w.id and e.event_date >= ${c.today}) as planned
-    from p4t.wishes w where (w.done_at is not null) = ${done} order by w.created_at desc limit 500`);
-  const cats = [...new Set(rows.map((r: any) => r.category))] as string[];
-  const list = rows.filter((r: any) => cat === 'all' || r.category === cat);
-  const per = 8, pages = Math.max(1, Math.ceil(list.length / per));
-  page = Math.min(Math.max(0, page), pages - 1);
-  const slice = list.slice(page * per, page * per + per);
-  const L = [done ? '✅ <b>Где мы уже были</b>' : `📍 <b>Хочу сходить</b> · ${rows.length}`];
-  if (cat !== 'all' && CATS[cat]) L.push(`Фильтр: ${CATS[cat].join(' ')}`);
+    from p4t.wishes w where (w.done_at is not null) = ${done}
+      and (${cat === 'all'} or w.category = ${cat})
+    order by w.created_at desc, w.id desc limit ${per} offset ${page * per}`);
+  const cats = done ? [] : (await inC(c, (tx) => tx`
+    select distinct category from p4t.wishes where done_at is null order by category`))
+    .map((r: any) => r.category as string);
+  const L = [done ? '✅ <b>Где мы уже были</b>' : `📍 <b>Хочу сходить</b> · ${total}`];
+  if (cat !== 'all') L.push(`Фильтр: ${CATS[cat].join(' ')}`);
+  if (total) L.push(`Страница ${page + 1}/${pages}`);
   L.push('');
-  if (!slice.length) L.push(done ? 'Пока пусто.' : 'Список пуст. Добавь ресторан, выставку или место для прогулки — без даты, просто чтобы не забыть.');
-  for (const w of slice) L.push(`${CATS[w.category]?.[0] ?? '✨'} ${esc(w.title)}${w.planned ? ` · 📅 ${fmtShortDate(w.planned)}` : ''}`);
+  if (!rows.length) L.push(done ? 'Пока пусто.' : 'Список пуст. Добавь ресторан, выставку или место для прогулки — без даты, просто чтобы не забыть.');
+  for (const w of rows) L.push(`${CATS[w.category]?.[0] ?? '✨'} ${esc(w.title)}${w.planned ? ` · 📅 ${fmtShortDate(w.planned)}` : ''}`);
   const p = done ? 'wd' : 'wl';
-  const rowsKb: Btn[][] = slice.map((w: any) => [b(`${CATS[w.category]?.[0] ?? '✨'} ${cut(w.title, 34)}${w.planned ? ' 📅' : ''}`, `wi:o:${w.id}`)]);
+  const rowsKb: Btn[][] = rows.map((w: any) => [b(`${CATS[w.category]?.[0] ?? '✨'} ${cut(w.title, 34)}${w.planned ? ' 📅' : ''}`, `wi:o:${w.id}`)]);
   if (cats.length > 1 && !done) {
-    const f = [b(cat === 'all' ? '• Все' : 'Все', `${p}:all:0`), ...cats.slice(0, 6).map((k) => b((cat === k ? '• ' : '') + CATS[k][0], `${p}:${k}:0`))];
-    rowsKb.push(f.slice(0, 4), f.slice(4));
+    const f = [b(cat === 'all' ? '• Все' : 'Все', `${p}:all:0`),
+      ...cats.map((k) => b((cat === k ? '• ' : '') + CATS[k][0], `${p}:${k}:0`))];
+    for (let i = 0; i < f.length; i += 4) rowsKb.push(f.slice(i, i + 4));
   }
-  rowsKb.push([page > 0 ? b('‹', `${p}:${cat}:${page - 1}`) : null, pages > 1 ? b(`${page + 1}/${pages}`, 'noop') : null, page < pages - 1 ? b('›', `${p}:${cat}:${page + 1}`) : null].filter(Boolean) as Btn[]);
-  if (!done) rowsKb.push([b('➕ Добавить', 'add:wish', 'primary'), rows.length ? b('🎲 Куда сходим?', 'wi:rnd') : null].filter(Boolean) as Btn[]);
+  if (pages > 1) rowsKb.push([
+    page > 0 ? b('‹', `${p}:${cat}:${page - 1}`) : null,
+    b(`${page + 1}/${pages}`, 'noop'),
+    page < pages - 1 ? b('›', `${p}:${cat}:${page + 1}`) : null,
+  ].filter(Boolean) as Btn[]);
+  if (!done) rowsKb.push([b('➕ Добавить', 'add:wish', 'primary'), total ? b('🎲 Куда сходим?', 'wi:rnd') : null].filter(Boolean) as Btn[]);
   rowsKb.push([done ? b('📍 Хочу сходить', 'wl:all:0') : b('✅ Где уже были', 'wd:all:0'), b('🏠 Главная', 'nav:home')]);
   await show(c, L.join('\n'), kb(...rowsKb));
 }

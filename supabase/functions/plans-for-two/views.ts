@@ -312,25 +312,45 @@ export async function eventLink(c: Ctx, id: number, gid: number | null) {
 
 // ============================== Цели и бюджет ==============================
 
-export async function goalsList(c: Ctx, archived = false) {
+export async function goalsList(c: Ctx, archived = false, page = 0) {
   if (!c.couple) return await onboarding(c);
-  const goals = await inC(c, (tx) => goalsWithSaved(tx, archived));
-  const L = [archived ? '📦 <b>Архив целей</b>' : '🎯 <b>Наши цели</b>', ''];
+  const per = 8;
+  const [count] = await inC(c, (tx) => tx`select count(*)::int as n from p4t.goals where archived = ${archived}`);
+  const total = Number(count.n);
+  const pages = Math.max(1, Math.ceil(total / per));
+  page = Math.min(Math.max(0, Math.floor(page) || 0), pages - 1);
+  const rows = await inC(c, (tx) => tx`
+    select g.id, g.title, g.emoji, g.target, g.deadline::text as deadline,
+      g.archived, g.achieved_at, g.created_by, coalesce(sum(x.amount), 0) as saved
+    from p4t.goals g left join p4t.contributions x on x.goal_id = g.id
+    where g.archived = ${archived}
+    group by g.id order by g.created_at, g.id
+    limit ${per} offset ${page * per}`);
+  const goals: Goal[] = rows.map((r: any) => ({ ...r, id: Number(r.id), target: num(r.target), saved: num(r.saved), created_by: Number(r.created_by) }));
+  const L = [archived ? '📦 <b>Архив целей</b>' : '🎯 <b>Наши цели</b>', total ? `Всего: ${total} · страница ${page + 1}/${pages}` : '', ''];
   if (!goals.length) L.push(archived ? 'В архиве пусто.' : 'Целей пока нет. Машина, отпуск, свадьба — с чего начнём?');
-  let total = 0;
   for (const g of goals) {
     const p = pctOf(g.saved, g.target);
-    total += g.saved;
     L.push(`${g.emoji} <b>${esc(g.title)}</b> — ${p}%${p >= 100 ? ' 🎉' : ''}`);
     L.push(`${bar(p)}`);
     L.push(`${money(c, g.saved)} из ${money(c, g.target)}${g.deadline ? ' · до ' + fmtShortDate(g.deadline) + ' ' + g.deadline.slice(0, 4) : ''}`, '');
   }
-  if (goals.length && !archived) L.push(`💰 Всего накоплено: <b>${money(c, total)}</b>`);
-  await show(c, L.join('\n').trim(), kb(
-    ...goals.map((g) => [b(`${g.emoji} ${cut(g.title, 28)} · ${pctOf(g.saved, g.target)}%`, `g:o:${g.id}`)]),
-    [archived ? null : b('➕ Новая цель', 'add:goal', 'primary'), archived ? b('🎯 Активные', 'gl:0') : b('📦 Архив', 'gl:1')],
-    navRow(),
-  ));
+  if (total && !archived) {
+    const [saved] = await inC(c, (tx) => tx`
+      select coalesce(sum(x.amount), 0) as amount from p4t.contributions x
+      join p4t.goals g on g.id = x.goal_id where not g.archived`);
+    L.push(`💰 Всего накоплено: <b>${money(c, num(saved.amount))}</b>`);
+  }
+  const rowsKb: Btn[][] = goals.map((g) => [b(`${g.emoji} ${cut(g.title, 28)} · ${pctOf(g.saved, g.target)}%`, `g:o:${g.id}`)]);
+  if (pages > 1) rowsKb.push([
+    page > 0 ? b('‹', `gl:${archived ? 1 : 0}:${page - 1}`) : null,
+    b(`${page + 1}/${pages}`, 'noop'),
+    page < pages - 1 ? b('›', `gl:${archived ? 1 : 0}:${page + 1}`) : null,
+  ].filter(Boolean) as Btn[]);
+  rowsKb.push([archived ? null : b('➕ Новая цель', 'add:goal', 'primary'),
+    archived ? b('🎯 Активные', 'gl:0:0') : b('📦 Архив', 'gl:1:0')].filter(Boolean) as Btn[]);
+  rowsKb.push(navRow());
+  await show(c, L.join('\n').trim(), kb(...rowsKb));
 }
 
 async function goalDetails(c: Ctx, id: number) {
