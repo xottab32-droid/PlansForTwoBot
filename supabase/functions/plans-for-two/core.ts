@@ -200,9 +200,22 @@ export async function allEvents(tx: Q): Promise<Ev[]> {
   const rows = await tx`
     select id, kind, title, event_date::text as event_date, to_char(event_time, 'HH24:MI') as event_time,
            place, note, yearly, goal_id, wish_id, created_by
-    from p4t.events order by event_date, event_time nulls first limit 2000`;
+    from p4t.events order by event_date, event_time nulls first`;
   return rows.map(mapEv);
 }
+/** Извлекаем только события выбранного месяца для календаря. */
+export async function eventsForMonth(tx: Q, year: number, month: number): Promise<Ev[]> {
+  const from = `${year}-${String(month).padStart(2, '0')}-01`;
+  const to = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+  const rows = await tx`
+    select id, kind, title, event_date::text as event_date, to_char(event_time, 'HH24:MI') as event_time,
+      place, note, yearly, goal_id, wish_id, created_by from p4t.events
+    where (not yearly and event_date >= ${from}::date and event_date < ${to}::date)
+       or (yearly and extract(month from event_date) = ${month} and event_date < ${to}::date)
+    order by event_date, event_time nulls first`;
+  return rows.map(mapEv);
+}
+
 export const mapEv = (r: any): Ev => ({ ...r, id: Number(r.id), goal_id: r.goal_id ? Number(r.goal_id) : null, wish_id: r.wish_id ? Number(r.wish_id) : null, created_by: Number(r.created_by) });
 export async function eventById(tx: Q, id: number): Promise<Ev | null> {
   const [r] = await tx`
