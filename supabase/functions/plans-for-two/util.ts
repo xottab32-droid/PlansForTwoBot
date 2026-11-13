@@ -170,6 +170,13 @@ export function parseEmoji(input: string): string | null {
   return /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(t) ? t : null;
 }
 export const utf8len = (s: string) => new TextEncoder().encode(s).length;
+/** JSON для виджета не длиннее 1000 байт: по очереди укорачиваем списки */
+// deno-lint-ignore no-explicit-any
+export function fitJson(o: any, shrink: (() => boolean)[]): string {
+  let s = JSON.stringify(o);
+  for (const f of shrink) { while (utf8len(s) > 1000 && f()) s = JSON.stringify(o); }
+  return s;
+}
 export const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 /** Красивые суммы быстрых пополнений, исходя из цели */

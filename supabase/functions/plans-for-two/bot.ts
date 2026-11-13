@@ -10,6 +10,7 @@ const MENU_LABELS: Record<string, (c: Ctx) => Promise<unknown>> = {
   '📅 Календарь': (c) => V.calendar(c),
   '🎯 Цели': (c) => V.goalsList(c),
   '📍 Хочу сходить': (c) => V.wishList(c),
+  '🎁 Подарки': (c) => V.giftsHome(c),
   '➕ Добавить': (c) => V.addMenu(c),
   '⚙️ Настройки': (c) => V.settings(c),
 };
@@ -48,6 +49,8 @@ async function command(c: Ctx, cmd: string, arg: string) {
     case 'addgoal': return await V.addGoal(c);
     case 'wishlist': case 'wish': return await V.wishList(c);
     case 'addwish': return await V.addWish(c);
+    case 'gifts': case 'gift': case 'presents': return await V.giftsHome(c);
+    case 'addgift': return await V.addGift(c);
     case 'addpart': case 'invite': case 'newpair': return await V.invite(c);
     case 'join': return arg ? await V.joinPreview(c, arg) : await W.startWizard(c, 'join');
     case 'settings': return await V.settings(c);
@@ -129,6 +132,7 @@ async function route(c: Ctx, data: string) {
         case 'cal': return await V.calendar(c);
         case 'goals': return await V.goalsList(c);
         case 'wish': return await V.wishList(c);
+        case 'gift': return await V.giftsHome(c);
         case 'add': return await V.addMenu(c);
         case 'set': return await V.settings(c);
         case 'help': return await V.help(c);
@@ -150,6 +154,7 @@ async function route(c: Ctx, data: string) {
       if (p[1] === 'ev') return await V.addEvent(c, p[2]);
       if (p[1] === 'goal') return await V.addGoal(c);
       if (p[1] === 'wish') return await V.addWish(c);
+      if (p[1] === 'gift') return await V.addGift(c);
       return;
     case 'up': return await V.upcomingList(c, Number(p[1]) || 0);
     case 'pa': return await V.upcomingList(c, Number(p[1]) || 0, true);
@@ -157,6 +162,7 @@ async function route(c: Ctx, data: string) {
     case 'wl': return await V.wishList(c, p[1] ?? 'all', Number(p[2]) || 0);
     case 'wd': return await V.wishList(c, p[1] ?? 'all', Number(p[2]) || 0, true);
     case 's': return await V.settingsAction(c, p[1], p[2]);
+    case 'gf': return await V.giftRoute(c, p);
   }
   if (p[0] === 'wi' && p[1] === 'rnd') return await V.wishRandom(c);
   if (!Number.isInteger(id) || id <= 0) return;

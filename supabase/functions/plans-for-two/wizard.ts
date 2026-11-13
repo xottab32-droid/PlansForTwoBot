@@ -1,5 +1,5 @@
 // Пошаговый ввод в одной карточке: бот редактирует одно сообщение, введённый текст удаляется.
-import { cleanName, Ctx, CATS, GOAL_EMOJI, KINDS, nameOf, saveState, show, WS } from './core.ts';
+import { cleanName, Ctx, CATS, GOAL_EMOJI, KINDS, nameOf, partner, PRIO, saveState, show, WS } from './core.ts';
 import { b, Btn, del, kb } from './tg.ts';
 import { addDays, esc, fmtDate, fmtMoney, isoOf, MONTHS, parseAmount, parseDate, parseEmoji, parseTime, quickAmounts, WD, weekday, daysInMonth } from './util.ts';
 import * as V from './views.ts';
@@ -25,8 +25,12 @@ const cur = (c: Ctx) => c.couple?.currency ?? '₽';
 const EV_STEPS: Step[] = [
   { key: 'kind', label: 'Тип', type: 'choice', q: () => 'Что добавляем?',
     opts: () => Object.entries(KINDS).map(([k, v]) => [`${v.e} ${v.n}`, k]), show: (v) => `${KINDS[v].e} ${KINDS[v].n}` },
-  { key: 'title', label: 'Название', type: 'text', max: 100,
-    q: (d) => d.kind === 'birthday' ? 'Чей день рождения? Например: «Аня» или «Мама Миши».'
+  // Чей день рождения: для своих бот подскажет второму про список желаний
+  { key: 'who', label: 'Чей', type: 'choice', when: (d) => d.kind === 'birthday', q: () => 'Чей день рождения?',
+    opts: (_d, c) => [['🙋 Мой', 'me'], ...(partner(c) ? [[`💞 ${partner(c)!.first_name}`, 'p'] as [string, string]] : []), ['👤 Другого человека', 'o']],
+    show: (v, _d, c) => v === 'me' ? 'мой' : v === 'p' ? (partner(c)?.first_name ?? 'партнёра') : 'другого человека' },
+  { key: 'title', label: 'Название', type: 'text', max: 100, when: (d) => d.kind !== 'birthday' || d.who === 'o',
+    q: (d) => d.kind === 'birthday' ? 'Чей день рождения? Например: «Мама Миши» или «Лена с работы».'
       : d.kind === 'trip' ? 'Куда едем? Например: «Питер на выходные».'
       : d.kind === 'date' ? 'Как назовём свидание? Например: «Ужин в Пушкине». Можно пропустить.'
       : d.kind === 'important' ? 'Что за дата? Например: «Переезд» или «Визит к врачу».'
@@ -81,6 +85,20 @@ const WISH_STEPS: Step[] = [
   { key: 'note', label: 'Заметка', type: 'text', max: 500, optional: () => true, q: () => 'Заметка или ссылка? Адрес, меню, сайт. Можно пропустить.' },
 ];
 
+const GIFT_STEPS: Step[] = [
+  { key: 'title', label: 'Желание', type: 'text', max: 100, q: () => 'Что хочешь получить в подарок? Например: «Наушники Sony WH-1000XM5» или «Сертификат в спа».' },
+  { key: 'price', label: 'Примерная цена', type: 'amount', optional: () => true,
+    q: (_d, c) => `Примерная цена (${cur(c)})? Например: 15000 или 15к. Можно пропустить.`,
+    show: (v, _d, c) => fmtMoney(v, cur(c)), check: (v) => v > 0 && v < 1e12 ? null : 'Цена должна быть больше нуля' },
+  { key: 'prio', label: 'Насколько хочется', type: 'choice', q: () => 'Насколько хочется?',
+    opts: () => Object.entries(PRIO).map(([k, [e, n]]) => [`${e} ${n}`, k]), show: (v) => PRIO[v]?.join(' ') ?? '' },
+  { key: 'url', label: 'Ссылка', type: 'text', max: 500, optional: () => true,
+    q: () => 'Ссылка на товар? Отправь адрес, начинающийся с https://. Можно пропустить.',
+    check: (v) => /^https?:\/\/\S+$/i.test(String(v)) ? null : 'Нужна ссылка, начинающаяся с https://' },
+  { key: 'note', label: 'Заметка', type: 'text', max: 500, optional: () => true,
+    q: () => 'Уточнения? Размер, цвет, модель, «не дороже 5000». Можно пропустить.' },
+];
+
 const JOIN_STEPS: Step[] = [
   { key: 'code', label: 'Код', type: 'text', max: 20, q: () => 'Введи код приглашения от партнёра (8 символов, например K7M2-QX9P).' },
 ];
@@ -97,6 +115,7 @@ export const FLOWS: Record<string, Flow> = {
   goal: { title: (s) => s.id ? '✏️ Изменение цели' : '🎯 Новая цель', steps: GOAL_STEPS, done: (c, s) => V.finishGoal(c, s) },
   top: { title: (s) => (s.d.sign > 0 ? '➕ Пополнение: ' : '➖ Снятие: ') + `${s.d.emoji ?? ''} ${s.d.gtitle ?? ''}`, steps: TOP_STEPS, done: (c, s) => V.finishTopUp(c, s) },
   wish: { title: (s) => s.id ? '✏️ Изменение записи' : '📍 Хочу сходить', steps: WISH_STEPS, done: (c, s) => V.finishWish(c, s) },
+  gift: { title: (s) => s.id ? '✏️ Изменение желания' : '🎁 Новое желание', steps: GIFT_STEPS, done: (c, s) => V.finishGift(c, s) },
   join: { title: () => '🔑 Вход по коду', steps: JOIN_STEPS, done: (c, s) => V.finishJoin(c, s) },
   name: { title: () => '✏️ Твоё имя', steps: NAME_STEPS, done: (c, s) => V.finishName(c, s), cancel: (c) => V.settings(c, '✖️ Имя не изменено.') },
 };

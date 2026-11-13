@@ -37,6 +37,7 @@ s.g.forEach(x=>{const r=el('div','r',null,A);r.style.display='block';const t=el(
 el('span',null,x[1],t);el('b',null,x[2],t);el('span','m',x[3]+'%',t);const br=el('div','bar',null,r);el('i',null,null,br).style.width=Math.min(100,x[3])+'%';
 el('div','m',x[4],r);r.onclick=()=>{hap();ask('g:'+x[0])}});
 const w=el('div','r',null,A);w.style.marginTop='12px';el('span',null,'📍',w);el('b',null,'Хочу сходить',w);el('span','p',String(s.w),w);w.onclick=()=>{hap();ask('o:w')};
+if(s.f){const f=el('div','r',null,A);el('span',null,'🎁',f);el('b',null,'Желания и подарки',f);el('span','m',s.f[1]!=null?'мои '+s.f[0]+' · '+s.b+' '+s.f[1]:String(s.f[0]),f);f.onclick=()=>{hap();ask('o:p')}}
 if(W)W.ready()}
 draw(W?J(W.chatData):null);bg('h',draw);if(W)W.onEvent('activated',()=>bg('h',draw));`,
 );
@@ -123,10 +124,33 @@ el('div','m','В среднем '+s0.ad+' дн. с ботом, ~'+s0.ah+' дей
 el('div','k','Удержание',A);const g3=el('div','g3',null,A);tile(g3,P(s0.fg[0],s0.fg[1])+'%','запустили и забыли ('+s0.fg[0]+' из '+s0.fg[1]+')');
 tile(g3,s0.rt[1]?P(s0.rt[0],s0.rt[1])+'%':'—','вернулись через неделю');tile(g3,F(s0.h[1]),'действий за 7 дней')}
 if(TB===2){el('div','k','Воронка',A);const fn=s0.fn;[['Запустили',fn[0]],['В паре',fn[1]],['Полная пара',fn[2]],['Есть записи',fn[3]]].forEach(x=>hbar(A,x[0],x[1],fn[0]));
-el('div','k','Функции · доля пар из '+s0.fe[4],A);[['📅 События',0],['🎯 Цели',1],['💰 Пополнения',2],['📍 Хочу сходить',3]].forEach(x=>hbar(A,x[0],s0.fe[x[1]],s0.fe[4]))}
+el('div','k','Функции · доля пар из '+s0.fe[4],A);[['📅 События',0],['🎯 Цели',1],['💰 Пополнения',2],['📍 Хочу сходить',3],['🎁 Желания',5]].forEach(x=>hbar(A,x[0],s0.fe[x[1]],s0.fe[4]))}
 if(TB===3){const t=s0.tt,g4=el('div','g3',null,A);tile(g4,F(t[0]),'событий');tile(g4,F(t[1]),'целей, достигнуто '+t[2]);tile(g4,F(t[3]),'операций по целям');
-tile(g4,F(t[4]),'мест, посетили '+t[5]);tile(g4,F(t[6]),'связей с событиями');tile(g4,F(t[7]),'напоминаний за 7 дн.');
+tile(g4,F(t[4]),'мест, посетили '+t[5]);tile(g4,F(t[6]),'связей с событиями');tile(g4,F(t[7]),'напоминаний за 7 дн.');tile(g4,F(t[8]||0),'желаний, подарено '+(t[9]||0));
 el('div','k','Настройки и отток',A);const g5=el('div','g3',null,A);tile(g5,F(s0.o[0]),'заблокировали');tile(g5,F(s0.o[1]),'без новостей');tile(g5,F(s0.o[2]+s0.o[3]),'без карточек / звука')}
 el('div','m','Обновлено '+s0.at+' UTC · только обезличенные цифры',A).style.marginTop='10px';if(W)W.ready()}
 draw(W?J(W.chatData):null);bg('as',draw);if(W)W.onEvent('activated',()=>bg('as',draw));`,
+);
+
+// ---------- Желания и подарки ----------
+// Данные собраны под зрителя: на своих желаниях отметок дарителя нет совсем (их не отдаёт база).
+// m/p: [строка повода, всего, [[id, приоритет, название, цена, (отметка 0/1/2)]]]
+export const GIFT_HTML = page(
+  `.sg{display:flex;gap:4px;margin-bottom:8px}.sg button{flex:1;padding:6px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sg .on{background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color)}.q{display:flex;gap:6px;margin-top:10px}.q button{flex:1}
+.r{cursor:pointer}.p.o{background:none;color:var(--tg-theme-link-color);box-shadow:inset 0 0 0 1px var(--tg-theme-link-color)}.p.b{background:#34c759;color:#fff}`,
+  `let T=0;const PS=['＋ отметить','🤫 выбрал','🛍 купил'],NX=['p','b','n'];
+function row(x,t){const r=el('div','r',null,A);el('span',null,x[1],r);el('b',null,x[2],r);if(x[3])el('span','m',x[3],r);r.onclick=()=>{hap();ask('go:'+x[0])};
+if(t){const s=el('span','p'+(x[4]===2?' b':x[4]?'':' o'),PS[x[4]],r);s.onclick=e=>{e.stopPropagation();hap();ask('gs:'+x[0]+':'+NX[x[4]],draw)}}}
+function draw(s){if(!s)return;if(s.m)S=s;if(!S){if(s.err){A.textContent='';el('div','e',s.err,A)}return}A.textContent='';if(!S.p)T=0;
+if(S.p){const tb=el('div','sg',null,A);['🙋 Мои','💞 '+S.b].forEach((x,i)=>{el('button',i===T?'on':null,x,tb).onclick=()=>{hap();T=i;draw({})}})}
+else el('div','k','Мои желания',A);
+const d=T?S.p:S.m;if(d[0])el('div','m',d[0],A);if(s.err)el('div','e',s.err,A);
+if(!d[2].length)el('div','m',T?S.b+' пока ничего не добавил(а) — можно намекнуть 😉':'Добавь, что хочешь получить в подарок — с ценой и ссылкой',A);
+d[2].forEach(x=>row(x,T));
+const f=el('div','q',null,A);if(!T)el('button',null,'➕ Добавить',f).onclick=()=>{hap();ask('ga')};
+if(d[1])el('button',null,'📋 Все ('+d[1]+') ›',f).onclick=()=>{hap();ask('gl:'+(T?'p':'m'))};
+el('div','m',T?'🤫 '+S.b+' не видит твои отметки «выбрал» и «купил»':(S.p?S.b+' видит список, но не видит, что выбрано':'Партнёр увидит список, когда присоединится'),A).style.marginTop='8px';
+if(W)W.ready()}
+draw(W?J(W.chatData):null);bg('gw',draw);if(W)W.onEvent('activated',()=>bg('gw',draw));`,
 );

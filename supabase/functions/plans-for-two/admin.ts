@@ -61,7 +61,8 @@ async function collectStats() {
         exists (select 1 from p4t.events e where e.couple_id = cp.id) as has_ev,
         exists (select 1 from p4t.goals g where g.couple_id = cp.id) as has_goal,
         exists (select 1 from p4t.contributions x where x.couple_id = cp.id) as has_contr,
-        exists (select 1 from p4t.wishes w where w.couple_id = cp.id) as has_wish
+        exists (select 1 from p4t.wishes w where w.couple_id = cp.id) as has_wish,
+        exists (select 1 from p4t.gifts gf where gf.couple_id = cp.id) as has_gift
       from p4t.couples cp left join cm on cm.couple_id = cp.id
     ),
     ad as (select tg_id, count(*)::int as days from p4t.activity group by tg_id),
@@ -92,6 +93,7 @@ async function collectStats() {
       'f_goal', (select count(*) from c where n > 0 and has_goal),
       'f_contr', (select count(*) from c where n > 0 and has_contr),
       'f_wish', (select count(*) from c where n > 0 and has_wish),
+      'f_gift', (select count(*) from c where n > 0 and has_gift),
       'c_live', (select count(*) from c where n > 0)
     ) || jsonb_build_object(
       'dau', (select count(*) from p4t.activity, td where day = td.d),
@@ -118,6 +120,9 @@ async function collectStats() {
       'n_contr_new7', (select count(*) from p4t.contributions where created_at > now() - interval '7 days'),
       'n_wishes', (select count(*) from p4t.wishes),
       'n_wishes_done', (select count(*) from p4t.wishes where done_at is not null),
+      -- только общее число желаний и подаренных; тайные отметки дарителей в статистику не попадают
+      'n_gifts', (select count(*) from p4t.gifts),
+      'n_gifts_given', (select count(*) from p4t.gifts where given_by is not null),
       'n_linked', (select count(*) from p4t.events where goal_id is not null or wish_id is not null),
       'reminders7', (select count(*) from p4t.sent where created_at > now() - interval '7 days'),
       'de', (select to_char(d, 'YYYY-MM-DD') from td),
@@ -165,9 +170,9 @@ export function statsText(s: Record<string, any>) {
     `   запустили ${f(s.users)} → в паре ${f(s.u_paired)} (${pct(s.u_paired, s.users)}%) → полная пара ${f(s.u_full)} (${pct(s.u_full, s.users)}%) → есть записи ${f(s.u_content)} (${pct(s.u_content, s.users)}%)`,
     '',
     `🧩 <b>Функции</b> (доля пар из ${f(s.c_live)})`,
-    `   📅 события ${pct(s.f_ev, s.c_live)}% · 🎯 цели ${pct(s.f_goal, s.c_live)}% · 💰 пополнения ${pct(s.f_contr, s.c_live)}% · 📍 «хочу сходить» ${pct(s.f_wish, s.c_live)}%`,
+    `   📅 события ${pct(s.f_ev, s.c_live)}% · 🎯 цели ${pct(s.f_goal, s.c_live)}% · 💰 пополнения ${pct(s.f_contr, s.c_live)}% · 📍 «хочу сходить» ${pct(s.f_wish, s.c_live)}% · 🎁 желания ${pct(s.f_gift, s.c_live)}%`,
     `   всего: событий ${f(s.n_events)} (+${f(s.n_events_new7)} за 7 дн.) · целей ${f(s.n_goals)} (достигнуто ${f(s.n_goals_done)})`,
-    `   операций по целям ${f(s.n_contr)} (+${f(s.n_contr_new7)} за 7 дн.) · мест ${f(s.n_wishes)} (посетили ${f(s.n_wishes_done)}) · связей цель/место → событие ${f(s.n_linked)}`,
+    `   операций по целям ${f(s.n_contr)} (+${f(s.n_contr_new7)} за 7 дн.) · мест ${f(s.n_wishes)} (посетили ${f(s.n_wishes_done)}) · связей цель/место → событие ${f(s.n_linked)} · желаний ${f(s.n_gifts)} (подарено через бота ${f(s.n_gifts_given)})`,
     `   напоминаний отправлено за 7 дн.: ${f(s.reminders7)}`,
     '',
     '⚙️ <b>Прочее</b>',
@@ -196,8 +201,8 @@ export function statsJson(s: Record<string, any>): string {
     pa: [s.c_act7, s.c_cool, s.c_lost], cu: s.c_used,
     fg: [s.forgot, s.forgot_base], rt: [s.ret7, s.ret_base],
     fn: [s.users, s.u_paired, s.u_full, s.u_content],
-    fe: [s.f_ev, s.f_goal, s.f_contr, s.f_wish, s.c_live],
-    tt: [s.n_events, s.n_goals, s.n_goals_done, s.n_contr, s.n_wishes, s.n_wishes_done, s.n_linked, s.reminders7],
+    fe: [s.f_ev, s.f_goal, s.f_contr, s.f_wish, s.c_live, s.f_gift],
+    tt: [s.n_events, s.n_goals, s.n_goals_done, s.n_contr, s.n_wishes, s.n_wishes_done, s.n_linked, s.reminders7, s.n_gifts, s.n_gifts_given],
     o: [s.blocked, s.news_off, s.widgets_off, s.quiet],
     d: daily.map((x) => [x[1], x[2]]),
     de: s.de, at: s.at,
