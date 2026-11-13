@@ -104,13 +104,13 @@ pg_cron (раз в минуту)   ──pg_net──▶ plans-for-two?broadcast
 supabase/
   config.toml                              verify_jwt = false для вебхука
   migrations/
-    20261112190000_p4t_init.sql            схема p4t, роль p4t_app, RLS, триггеры
-    20261112190100_p4t_cron.sql            pg_cron + pg_net, задание p4t-reminders
-    20261112190200_p4t_pg_net_schema.sql   pg_net в схеме extensions
-    20261113100000_p4t_admin.sql           активность, рассылки, admin_ids, задание p4t-broadcasts
-    20261114100000_p4t_display_name.sql    своё имя (users.display_name)
-    20261115100000_p4t_function_url.sql    адрес функции для pg_cron берётся из p4t.config
-    20261116100000_p4t_delivery_reliability.sql  состояния webhook и очередь напоминаний с повторными попытками
+    20261112190235_p4t_init.sql            схема p4t, роль p4t_app, RLS, триггеры
+    20261112190315_p4t_cron.sql            pg_cron + pg_net, задание p4t-reminders
+    20261112190412_p4t_pg_net_schema.sql   pg_net в схеме extensions
+    20261112192613_p4t_admin.sql           активность, рассылки, admin_ids, задание p4t-broadcasts
+    20261112200753_p4t_display_name.sql    своё имя (users.display_name)
+    20261112220246_p4t_function_url.sql    адрес функции для pg_cron берётся из p4t.config
+    20261113060143_p4t_delivery_reliability.sql  состояния webhook и очередь напоминаний с повторными попытками
   functions/plans-for-two/
     index.ts     HTTP: вебхук, ?cron, ?broadcast, ?bootstrap
     bot.ts       маршрутизация команд, кнопок и запросов виджетов
