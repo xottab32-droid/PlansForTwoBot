@@ -582,6 +582,9 @@ Deno.test({ name: 'gifts: secret marks, rights, isolation', sanitizeOps: false, 
   await runReminders(targetNow);
   const onlyGiver = await sql`select tg_id::int as id from p4t.reminder_deliveries where reminder_key like 'grem:%' order by tg_id`;
   assertEquals(onlyGiver.map((r: any) => r.id), [222], 'gift reminder never goes to the wish owner');
+  const checkPrivate = (userId: number) => inCouple(ca, async (tx) =>
+    Number((await tx`select count(*)::int as n from p4t.reminder_deliveries where reminder_key like 'grem:%'`)[0].n), userId);
+  assertEquals([await checkPrivate(111), await checkPrivate(222)], [0, 1], 'RLS must hide personal gift reminders from wish owner');
   const wb = await wq('B', `gs:${gid}:b`);
   assertEquals(wb.p[2][0][4], 2, 'widget: bought');
   assertEquals((await sql`select status from p4t.gift_plans`)[0].status, 'bought');
