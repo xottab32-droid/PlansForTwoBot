@@ -55,7 +55,7 @@ Deno.serve(async req=>{
     if(action==='register') {
       const code=typeof body.code==='string'?body.code:'';
       if(!/^[a-f0-9]{48}$/.test(code))return reply({error:'Invalid code'},400);
-      const ip=req.headers.get('cf-connecting-ip')??'unknown';
+      const ip=req.headers.get('cf-connecting-ip')??req.headers.get('x-real-ip')??req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()??'unknown';
       const ipHash=await hexHash('p4t-widget-ip:'+ip);
       const [rate]=await dbs`select count(*)::int as n from p4t.widget_devices where ip_hash=${ipHash} and created_at>now()-interval '1 hour'`;
       if(Number(rate?.n??0)>=12)return reply({error:'Слишком много попыток. Повтори через час.'},429);

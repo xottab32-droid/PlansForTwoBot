@@ -33,11 +33,15 @@ public class CoupleWidget extends AppWidgetProvider {
 
     @Override public void onUpdate(Context context, AppWidgetManager manager, int[] ids) {
         for (int id : ids) render(context, manager, id);
-        if (Api.prefs(context).getString("token", "").isEmpty()) return;
-        new Thread(() -> {
-            try { Api.fetch(context, false); } catch (Exception ignored) { }
-            redrawAll(context);
-        }, "daily-widget-fetch").start();
+        WidgetSyncJob.schedule(context);
+    }
+    @Override public void onEnabled(Context c) {
+        super.onEnabled(c);
+        WidgetSyncJob.schedule(c);
+    }
+    @Override public void onDisabled(Context c) {
+        super.onDisabled(c);
+        WidgetSyncJob.cancel(c);
     }
     @Override public void onAppWidgetOptionsChanged(Context c, AppWidgetManager m, int id, Bundle opts) {
         super.onAppWidgetOptionsChanged(c,m,id,opts);
