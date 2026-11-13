@@ -1,7 +1,7 @@
-name: Verify fixes without deployment
+name: Checks
 on:
   push:
-    branches: [fix/reliable-webhooks-reminders-pagination]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -28,18 +28,17 @@ jobs:
           sudo systemctl start postgresql
           sudo -u postgres psql -v ON_ERROR_STOP=1 -c "alter user postgres with password 'postgres';"
           sudo -u postgres psql -v ON_ERROR_STOP=1 -c "create role anon; create role authenticated; create role service_role;"
-      - name: Apply app schema and local cron stubs
+      - name: Apply all migrations in order (pg_cron/pg_net replaced by local stub)
         env:
           PGPASSWORD: postgres
         run: |
           set -e
-          for migration in \
-            supabase/migrations/20261112190000_p4t_init.sql \
-            tests/ci_cron_stub.sql \
-            supabase/migrations/20261113100000_p4t_admin.sql \
-            supabase/migrations/20261114100000_p4t_display_name.sql \
-            supabase/migrations/20261115100000_p4t_function_url.sql \
-            supabase/migrations/20261116100000_p4t_delivery_reliability.sql; do
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f tests/ci_cron_stub.sql
+          for migration in $(ls supabase/migrations/*.sql | sort); do
+            case "$migration" in
+              *_p4t_cron.sql|*_p4t_pg_net_schema.sql) echo "skip $migration (stub)"; continue ;;
+            esac
+            echo "apply $migration"
             psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$migration"
           done
       - name: Integration tests against local PostgreSQL only

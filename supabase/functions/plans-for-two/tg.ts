@@ -12,7 +12,7 @@ export type WidgetQuery = { id: string; from: User; chat?: { id: number; type: s
 export type Update = { update_id: number; message?: Message; callback_query?: Callback; widget_query?: WidgetQuery; my_chat_member?: unknown };
 
 export class TgError extends Error {
-  constructor(public method: string, public code: number, public description: string) {
+  constructor(public method: string, public code: number, public description: string, public retryAfter = 0) {
     super(`Telegram ${method} failed: ${code} ${description}`);
   }
 }
@@ -25,7 +25,7 @@ export async function api<T = any>(method: string, payload: Record<string, unkno
     body: JSON.stringify(payload), signal: AbortSignal.timeout(10000),
   });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok || !j.ok) throw new TgError(method, j?.error_code ?? res.status, j?.description ?? 'unknown');
+  if (!res.ok || !j.ok) throw new TgError(method, j?.error_code ?? res.status, j?.description ?? 'unknown', Number(j?.parameters?.retry_after) || 0);
   return j.result as T;
 }
 

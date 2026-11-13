@@ -42,9 +42,10 @@ export async function runReminders(now = new Date()) {
   // Доставляем уже сохранённую очередь, даже если новых напоминаний не было.
   await deliverPending();
   await sql`delete from p4t.sent where created_at < now() - interval '400 days'`;
-  await sql`delete from p4t.reminder_deliveries where status in ('sent', 'skipped', 'blocked')
+  await sql`delete from p4t.reminder_deliveries where status in ('sent', 'skipped', 'blocked', 'failed')
     and coalesce(sent_at, created_at) < now() - interval '30 days'`;
-  await sql`delete from p4t.updates where created_at < now() - interval '3 days' and status = 'done'`;
+  // retry/processing старше 3 дней Telegram уже не повторит
+  await sql`delete from p4t.updates where created_at < now() - interval '3 days'`;
   await sql`delete from p4t.activity where day < (now() at time zone 'UTC')::date - 400`;
   await sql`delete from p4t.broadcast_recipients r using p4t.broadcasts b
     where b.id = r.broadcast_id and b.status in ('done', 'canceled')
@@ -113,6 +114,9 @@ async function coupleReminders(cp: Couple, now: Date): Promise<number> {
   return out.length;
 }
 
+/** После стольких неудачных попыток доставка помечается failed (≈ сутки с учётом backoff) */
+export const MAX_DELIVERY_ATTEMPTS = 8;
+
 async function deliverOne(row: any) {
   const sql = db();
   const [user] = await sql`select couple_id, quiet, blocked_at from p4t.users where tg_id = ${row.tg_id}`;
@@ -131,8 +135,14 @@ async function deliverOne(row: any) {
       await sql`update p4t.users set blocked_at = now() where tg_id = ${row.tg_id}`;
       await sql`update p4t.reminder_deliveries set status = 'blocked', claimed_at = null, error = ${String(e).slice(0,300)}
         where id = ${row.id}`;
+    } else if ((e instanceof TgError && e.code === 400) || Number(row.attempts) >= MAX_DELIVERY_ATTEMPTS) {
+      // 400 — ошибка в самом сообщении или чате, повтор не поможет; лимит — от бесконечных повторов
+      await sql`update p4t.reminder_deliveries set status = 'failed', claimed_at = null, error = ${String(e).slice(0, 300)}
+        where id = ${row.id}`;
     } else {
-      const delay = Math.min(3600, 60 * (2 ** Math.min(6, Number(row.attempts) - 1)));
+      const backoff = Math.min(3600, 60 * (2 ** Math.min(6, Number(row.attempts) - 1)));
+      // 429: Telegram сам говорит, через сколько можно повторить
+      const delay = e instanceof TgError && e.code === 429 && e.retryAfter > 0 ? Math.min(3600, e.retryAfter + 1) : backoff;
       await sql`update p4t.reminder_deliveries
         set status = 'pending', claimed_at = null,
             next_attempt_at = now() + ${delay} * interval '1 second', error = ${String(e).slice(0,300)}

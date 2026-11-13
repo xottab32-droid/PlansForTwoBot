@@ -12,6 +12,8 @@ type Call = { method: string; p: any };
 const calls: Call[] = [];
 let mid = 1000;
 let failNextReminder = false;
+// Принудительная ошибка Telegram для sendMessage, текст которого содержит match
+let failSend: { match: string; code: number; retry_after?: number } | null = null;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = String(input);
@@ -26,6 +28,10 @@ globalThis.fetch = (async (input: any, init?: any) => {
       String(p.text ?? '').includes('Контроль повторной доставки')) {
     failNextReminder = false;
     return new Response(JSON.stringify({ ok: false, error_code: 502, description: 'Temporary Telegram failure' }), { status: 502 });
+  }
+  if (method === 'sendMessage' && failSend && String(p.text ?? '').includes(failSend.match)) {
+    const f = failSend;
+    return new Response(JSON.stringify({ ok: false, error_code: f.code, description: 'forced', parameters: f.retry_after ? { retry_after: f.retry_after } : undefined }), { status: f.code });
   }
   let result: any = true;
   if (method === 'copyMessage') result = { message_id: ++mid };
@@ -233,6 +239,25 @@ Deno.test({ name: 'full flow + isolation', sanitizeOps: false, sanitizeResources
   assertEquals(await processUpdate(sample, async () => { handled++; }), 'duplicate');
   assertEquals(handled, 2, 'processed only until success');
 
+  // Ошибка после записи данных пары: не повторяем (иначе задвоится действие), подтверждаем как failed
+  const wId = 987654322;
+  await sql`delete from p4t.updates where update_id = ${wId}`;
+  const r1 = await processUpdate({ update_id: wId }, async () => {
+    await inCouple(ca, (tx) => tx`insert into p4t.wishes (couple_id, title, created_by) values (${ca}, 'Повтор-тест', 111)`);
+    throw new Error('expected test failure after write');
+  });
+  assertEquals(r1, 'failed');
+  assertEquals(await processUpdate({ update_id: wId }, async () => { throw new Error('must not run'); }), 'duplicate');
+  assertEquals((await sql`select count(*)::int n from p4t.wishes where title = 'Повтор-тест'`)[0].n, 1, 'no double write');
+  // Только чтение и ошибка — повтор разрешён, но не больше MAX_UPDATE_ATTEMPTS раз
+  const pId = 987654323;
+  await sql`delete from p4t.updates where update_id = ${pId}`;
+  const poison = async () => { await inCouple(ca, (tx) => tx`select 1`); throw new Error('expected poison failure'); };
+  assertEquals(await processUpdate({ update_id: pId }, poison), 'retry');
+  assertEquals(await processUpdate({ update_id: pId }, poison), 'retry');
+  assertEquals(await processUpdate({ update_id: pId }, poison), 'failed');
+  assertEquals((await sql`select status from p4t.updates where update_id = ${pId}`)[0].status, 'failed');
+
   // --- 502 от Telegram не должна терять напоминание для второго участника.
   const tomorrow = addDays(localNow('Europe/Moscow').date, 1);
   await sql`insert into p4t.events (couple_id, kind, title, event_date, created_by)
@@ -248,6 +273,28 @@ Deno.test({ name: 'full flow + isolation', sanitizeOps: false, sanitizeResources
   const delivery2 = await sql`select tg_id::int as tg_id, status from p4t.reminder_deliveries
     where body like '%Контроль повторной доставки%' order by tg_id`;
   assertEquals(delivery2.map((r: any) => [r.tg_id, r.status]), [[111, 'sent'], [222, 'sent']]);
+
+  // 400 — окончательная ошибка: failed сразу; 429 — повтор через retry_after; лимит попыток
+  const qd = async (title: string) => {
+    await sql`insert into p4t.events (couple_id, kind, title, event_date, created_by) values (${ca}, 'important', ${title}, ${tomorrow}, 111)`;
+  };
+  await qd('Сбой-400');
+  failSend = { match: 'Сбой-400', code: 400 };
+  await runReminders();
+  failSend = null;
+  assertEquals((await sql`select array_agg(status order by tg_id) s from p4t.reminder_deliveries where body like '%Сбой-400%'`)[0].s, ['failed', 'failed']);
+  await qd('Сбой-429');
+  failSend = { match: 'Сбой-429', code: 429, retry_after: 600 };
+  await runReminders();
+  failSend = null;
+  const r429 = await sql`select status, extract(epoch from next_attempt_at - now())::int s from p4t.reminder_deliveries where body like '%Сбой-429%'`;
+  assert(r429.every((r: any) => r.status === 'pending' && r.s > 500 && r.s <= 601), JSON.stringify(r429));
+  const { MAX_DELIVERY_ATTEMPTS } = await import('../supabase/functions/plans-for-two/cron.ts');
+  await sql`update p4t.reminder_deliveries set attempts = ${MAX_DELIVERY_ATTEMPTS - 1}, next_attempt_at = now() - interval '1 minute' where body like '%Сбой-429%'`;
+  failSend = { match: 'Сбой-429', code: 502 };
+  await deliverPending();
+  failSend = null;
+  assertEquals((await sql`select array_agg(distinct status) s from p4t.reminder_deliveries where body like '%Сбой-429%'`)[0].s, ['failed'], 'attempts cap');
 
 
   // Запуск на заданную будущую дату использует эту дату и в SQL-отборе пар.

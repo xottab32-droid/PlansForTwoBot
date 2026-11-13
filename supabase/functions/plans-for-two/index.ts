@@ -77,7 +77,8 @@ Deno.serve(async (req) => {
     const result = await processUpdate(up, handleUpdate);
     // Telegram повторяет webhook только при не-2xx. Не подтверждаем недоставленное обновление.
     if (result === 'retry') return txt('retry', 503);
-    return txt(result === 'duplicate' ? 'dup' : 'ok');
+    // failed — подтверждаем, чтобы Telegram не повторял: повтор задвоит действие или снова упадёт
+    return txt(result === 'duplicate' ? 'dup' : result === 'failed' ? 'failed' : 'ok');
   } catch (e) {
     console.error(JSON.stringify({ request_failed: String(e) }));
     return txt('error', 500);
