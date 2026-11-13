@@ -13,10 +13,12 @@ create index if not exists gift_plans_remind_idx on p4t.gift_plans(couple_id, re
   where remind_on is not null;
 
 -- Обычные напоминания видны паре, а личные подарочные — только адресату.
+-- p4t.me() IS NULL допускается исключительно для внутреннего планировщика,
+-- которому нужен SELECT для INSERT ... ON CONFLICT DO NOTHING. API с этим ролью наружу не доступен.
 -- Воркер планировщика вставляет строки с p4t.user = NULL, поэтому INSERT разрешён всей паре.
 drop policy if exists reminder_deliveries_own on p4t.reminder_deliveries;
 create policy reminder_deliveries_read on p4t.reminder_deliveries for select to p4t_app
   using (couple_id = p4t.cur() and
-    (reminder_key not like 'grem:%' or tg_id = p4t.me()));
+    (reminder_key not like 'grem:%' or tg_id = p4t.me() or p4t.me() is null));
 create policy reminder_deliveries_insert on p4t.reminder_deliveries for insert to p4t_app
   with check (couple_id = p4t.cur());
