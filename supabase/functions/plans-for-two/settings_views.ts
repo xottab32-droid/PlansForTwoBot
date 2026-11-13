@@ -1,6 +1,6 @@
 import { cleanName, SUPPORT_BOT, SUPPORT_URL, Ctx, CURRENCIES, inC, nameOf, notifyPartner, pairTitle, partner, show, TZS, WS } from './core.ts';
 import { db } from './db.ts';
-import { b, kb, u } from './tg.ts';
+import { Btn, b, kb, u } from './tg.ts';
 import { esc, localNow, plural } from './util.ts';
 import { startWizard } from './wizard.ts';
 import { onboarding } from './pair_views.ts';

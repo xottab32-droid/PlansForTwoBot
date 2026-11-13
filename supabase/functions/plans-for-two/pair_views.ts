@@ -1,6 +1,6 @@
 import { BOT_USERNAME, Ctx, fmtExpiry, MENU, nameOf, notifyPartner, pairTitle, partner, show, withCouple } from './core.ts';
 import { db, Q } from './db.ts';
-import { b, kb, send, u } from './tg.ts';
+import { Btn, b, kb, send, u } from './tg.ts';
 import { esc, inviteCode, normCode, showCode } from './util.ts';
 import { home } from './views.ts';
 const navRow = (...extra: Btn[]): Btn[] => [...extra, b('🏠 Главная', 'nav:home')];
