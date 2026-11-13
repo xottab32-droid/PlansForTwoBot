@@ -16,7 +16,7 @@ const JS = `const W=window.TelegramWidget,A=document.getElementById('a');let S=n
 function el(t,c,x,p){const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;if(p)p.appendChild(e);return e}
 function J(s){try{return JSON.parse(s)}catch(e){return null}}
 function hap(){try{W.HapticFeedback.impactOccurred('light')}catch(e){}}
-function ask(d,f){if(!W||busy)return;busy=1;W.request(d).then(r=>{busy=0;const j=J(r.result);if(j&&f)f(j)},e=>{busy=0;if(f&&e.code!=='RATE_LIMITED'&&e.code!=='NOT_ALLOWED')f({err:'Нет связи с ботом, попробуй ещё раз'})})}
+function ask(d,f){if(!W||busy){if(f)f({err:'Запрос занят. Попробуй ещё раз.'});return}busy=1;W.request(d).then(r=>{busy=0;const j=J(r.result);if(f)f(j||{err:'Нет ответа от бота, попробуй ещё раз'})},e=>{busy=0;if(f)f({err:e.code==='RATE_LIMITED'?'Слишком много запросов. Повтори через несколько секунд.':'Не удалось связаться с ботом, попробуй ещё раз'})})}
 function bg(d,f){if(!W)return;W.request(d).then(r=>{const j=J(r.result);if(j)f(j)},()=>{})}`;
 
 const page = (body: string, script: string) =>
@@ -37,7 +37,7 @@ s.g.forEach(x=>{const r=el('div','r',null,A);r.style.display='block';const t=el(
 el('span',null,x[1],t);el('b',null,x[2],t);el('span','m',x[3]+'%',t);const br=el('div','bar',null,r);el('i',null,null,br).style.width=Math.min(100,x[3])+'%';
 el('div','m',x[4],r);r.onclick=()=>{hap();ask('g:'+x[0])}});
 const w=el('div','r',null,A);w.style.marginTop='12px';el('span',null,'📍',w);el('b',null,'Хочу сходить',w);el('span','p',String(s.w),w);w.onclick=()=>{hap();ask('o:w')};
-if(s.f){const f=el('div','r',null,A);el('span',null,'🎁',f);el('b',null,'Желания и подарки',f);el('span','m',s.f[1]!=null?'мои '+s.f[0]+' · '+s.b+' '+s.f[1]:String(s.f[0]),f);f.onclick=()=>{hap();ask('o:p')}}
+if(s.f){const f=el('div','r',null,A);el('span',null,'🎁',f);el('b',null,'Желания и подарки',f);el('span','m',s.f[1]!=null?'мои '+s.f[0]+' · '+s.b+' '+s.f[1]:String(s.f[0]),f);const status=el('div','m','',A);f.onclick=()=>{hap();status.textContent='Открываю подарки…';ask('o:p',r=>{status.textContent=r.err|| (r.opened==='widget'?'🎁 Виджет подарков отправлен ниже в чат ↓':'🎁 Список подарков отправлен ниже в чат ↓')})}}
 if(W)W.ready()}
 draw(W?J(W.chatData):null);bg('h',draw);if(W)W.onEvent('activated',()=>bg('h',draw));`,
 );
