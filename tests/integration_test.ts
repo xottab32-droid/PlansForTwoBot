@@ -542,9 +542,25 @@ Deno.test({ name: 'gifts: secret marks, rights, isolation', sanitizeOps: false, 
   assert(lastTo('A')!.p.text.includes('https://'), 'url validated');
   await text('A', 'https://example.com/sony');
   await text('A', 'Чёрные');
+  await tap('A', 'wz:v:0'); // категория — техника
+  await tap('A', 'wz:v:1'); // повод — день рождения
   const [g1] = await sql`select * from p4t.gifts`;
-  assertEquals([Number(g1.owner_id), g1.title, Number(g1.price), g1.priority, g1.url, g1.note], [111, 'Наушники Sony', 15000, 1, 'https://example.com/sony', 'Чёрные']);
+  assertEquals([Number(g1.owner_id), g1.title, Number(g1.price), g1.priority, g1.url, g1.note, g1.category, g1.occasion],
+    [111, 'Наушники Sony', 15000, 1, 'https://example.com/sony', 'Чёрные', 'tech', 'birthday']);
   const gid = Number(g1.id);
+  // Проверка завершённости виджета: HTML действительно отправляется и обновляется через query.
+  const wmark = calls.length;
+  await text('B', '/gifts');
+  const giftWidget = calls.slice(wmark).find((item) => item.method === 'sendWidget' && item.p.chat_id === 222);
+  assert(giftWidget && giftWidget.p.html.includes('Подобрать по бюджету'), 'gift widget sent with budget filters');
+  assert(new TextEncoder().encode(giftWidget.p.chat_data).length <= 1024, 'gift widget payload limit');
+  const initialWidget = await wq('B', 'gw');
+  assert(initialWidget.p[2].some((x: any[]) => x[2].includes('Наушники Sony')), 'partner gift shown in widget');
+  const withinBudget = await wq('B', 'gb:15000');
+  assertEquals([withinBudget.f, withinBudget.p[1], withinBudget.p[2][0][4]], [15000, 1, 0]);
+  const belowBudget = await wq('B', 'gb:5000');
+  assertEquals([belowBudget.f, belowBudget.p[1], belowBudget.p[2].length], [5000, 0, 0]);
+  assert((await wq('B', 'gb:123')).err, 'reject budget not offered in the widget');
   assert(allText('B', mark).includes('новое желание') && allText('B', mark).includes('Наушники Sony'), 'partner notified');
 
   // --- B видит список A и тайно отмечает
@@ -633,6 +649,8 @@ Deno.test({ name: 'gifts: secret marks, rights, isolation', sanitizeOps: false, 
   await tap('A', 'wz:v:1');
   await tap('A', 'wz:skip');
   await tap('A', 'wz:skip');
+  await tap('A', 'wz:skip'); // категория по умолчанию
+  await tap('A', 'wz:skip'); // повод по умолчанию
   const gid2 = Number((await sql`select id from p4t.gifts where title = 'Книга'`)[0].id);
   await tap('B', `gf:s:${gid2}:p`, 0);
   mark = calls.length;
@@ -659,9 +677,11 @@ Deno.test({ name: 'gifts: secret marks, rights, isolation', sanitizeOps: false, 
   await tap('B', 'add:gift', 0);
   await text('B', 'Кроссовки');
   await tap('B', 'wz:skip'); await tap('B', 'wz:v:1'); await tap('B', 'wz:skip'); await tap('B', 'wz:skip');
+  await tap('B', 'wz:skip'); await tap('B', 'wz:skip');
   await tap('A', 'add:gift', 0);
   await text('A', 'Духи');
   await tap('A', 'wz:skip'); await tap('A', 'wz:v:1'); await tap('A', 'wz:skip'); await tap('A', 'wz:skip');
+  await tap('A', 'wz:skip'); await tap('A', 'wz:skip');
   const gB = Number((await sql`select id from p4t.gifts where title = 'Кроссовки'`)[0].id);
   const gA = Number((await sql`select id from p4t.gifts where title = 'Духи'`)[0].id);
   await tap('A', `gf:s:${gB}:p`, 0);

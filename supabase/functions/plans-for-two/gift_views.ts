@@ -402,7 +402,7 @@ export async function giftJson(c: Ctx, err?: string, budget = 0) {
   const icon = (g: Gift) => pe(g) + (GIFT_CATS[g.category]?.[0] ?? '');
   const o: any = {
     b: p ? p.first_name.slice(0, 24) : null,
-    q: budgetChoices(c), f: budget,
+    cc: cur, q: budgetChoices(c), f: budget,
     m: [occText(c, 'm', d.bm).slice(0, 60), d.km.n, d.mine.map((g) => [g.id, icon(g), label(g, 24), pr(g)])],
     p: p && d.kp ? [
       [occText(c, 'p', d.bp), d.kp.n ? planText(d.kp) : ''].filter(Boolean).join(' · ').slice(0, 90),
