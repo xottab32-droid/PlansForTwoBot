@@ -561,6 +561,9 @@ Deno.test({ name: 'gifts: secret marks, rights, isolation', sanitizeOps: false, 
   const belowBudget = await wq('B', 'gb:5000');
   assertEquals([belowBudget.f, belowBudget.p[1], belowBudget.p[2].length], [5000, 0, 0]);
   assert((await wq('B', 'gb:123')).err, 'reject budget not offered in the widget');
+  const randomMark = calls.length;
+  await wq('B', 'gx:15000');
+  assert(allText('B', randomMark).includes('Идея для подарка'), 'widget random picker opens gift card');
   assert(allText('B', mark).includes('новое желание') && allText('B', mark).includes('Наушники Sony'), 'partner notified');
 
   // --- B видит список A и тайно отмечает
@@ -622,6 +625,15 @@ Deno.test({ name: 'gifts: secret marks, rights, isolation', sanitizeOps: false, 
   assert(!JSON.stringify(wc).includes('Наушники'), 'foreign widget clean');
   assertEquals(await inCouple(cc, async (tx) => (await tx`select count(*)::int n from p4t.gifts`)[0].n, 333), 0);
   assertEquals(Number((await sql`select count(*)::int n from p4t.gift_plans`)[0].n), 1);
+  // Большой список: widget data до 1024 байт, все записи остаются доступны через пагинацию.
+  for (let i = 0; i < 18; i++) {
+    await inCouple(cc, (tx) => tx`
+      insert into p4t.gifts (couple_id, owner_id, title, category, occasion)
+      values (${cc}, 333, ${'Длинный заголовок желания №' + i + ' — путешествие и впечатления'}, 'experience', 'anniversary')`, 333);
+  }
+  const largeWidget = await wq('D', 'gw');
+  assert(new TextEncoder().encode(JSON.stringify(largeWidget)).length <= 1024, 'large gift list widget response within byte limit');
+  assert(largeWidget.p[2].length > 0, 'large partner list renders');
   let foreignGive = false;
   try { foreignGive = (await inCouple<any[]>(cc, (tx) => tx`select p4t.gift_given(${gid}) as ok`, 333))[0].ok; } catch { /* */ }
   assertEquals(foreignGive, false, 'foreign give rejected');

@@ -209,9 +209,11 @@ export async function finishGift(c: Ctx, s: WS) {
     return Number(r.id);
   });
   const pr = price ? ' · ' + fmtMoney(price, c.couple!.currency) : '';
-  await notifyPartner(c, `🎁 <b>${nameOf(c.u)}</b> · новое желание\n${PRIO[prio][0]} <b>${esc(d.title)}</b>${pr}\n\n🤫 Решишь подарить — отметь «Выбрал(а)». ${nameOf(c.u)} этого не увидит.`,
+  const delivered = await notifyPartner(c, `🎁 <b>${nameOf(c.u)}</b> · новое желание\n${PRIO[prio][0]} <b>${esc(d.title)}</b>${pr}\n\n🤫 Решишь подарить — отметь «Выбрал(а)». ${nameOf(c.u)} этого не увидит.`,
     kb([b('Открыть', `gf:o:${id}`), b('🎁 Все желания', 'gf:l:p:0')]));
-  await giftCard(c, id, partner(c) ? `✅ Добавлено. ${nameOf(partner(c))} получил(а) уведомление.` : '✅ Добавлено в твой список желаний.');
+  await giftCard(c, id, !partner(c)
+    ? '✅ Добавлено в твой список желаний.'
+    : delivered ? '✅ Желание сохранено и партнёр уведомлён.' : '✅ Желание сохранено. Уведомление партнёру доставить не удалось.');
 }
 
 async function ownGift(c: Ctx, id: number) {
@@ -281,8 +283,10 @@ export async function giftGive(c: Ctx, id: number) {
   if (!g) return await notFound(c);
   const [r] = await inC(c, (tx) => tx`select p4t.gift_given(${id}) as ok`);
   if (!r?.ok) return await giftCard(c, id, '⚠️ Не получилось — возможно, желание уже отмечено полученным.');
-  await notifyPartner(c, `🎁 <b>${nameOf(c.u)}</b> подарил(а) тебе «${esc(g.title)}» ❤️\nЖелание перенесено в «Мне подарили».`, kb([b('Открыть', `gf:o:${id}`)]));
-  await giftCard(c, id, `🎉 Готово! ${memberName(c, g.owner_id)} получил(а) уведомление.`);
+  const delivered = await notifyPartner(c, `🎁 <b>${nameOf(c.u)}</b> подарил(а) тебе «${esc(g.title)}» ❤️\nЖелание перенесено в «Мне подарили».`, kb([b('Открыть', `gf:o:${id}`)]));
+  await giftCard(c, id, delivered
+    ? '🎉 Подарок отмечен как вручённый, владелец получил уведомление.'
+    : '🎉 Подарок отмечен как вручённый. Уведомление владельцу доставить не удалось.');
 }
 
 /**

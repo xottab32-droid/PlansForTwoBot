@@ -159,12 +159,16 @@ export async function show(c: Ctx, text: string, keyboard?: Kb, extra: Record<st
 }
 
 /** Уведомление второму партнёру (с учётом его настройки «без звука») */
-export async function notifyPartner(c: Ctx, text: string, keyboard?: Kb) {
+export async function notifyPartner(c: Ctx, text: string, keyboard?: Kb): Promise<boolean> {
   const p = partner(c);
-  if (!p) return;
+  if (!p) return false;
   try {
     await send(p.tg_id, text, keyboard, { disable_notification: p.quiet });
-  } catch (e) { await sendFailed(p.tg_id, e); }
+    return true;
+  } catch (e) {
+    await sendFailed(p.tg_id, e);
+    return false;
+  }
 }
 
 /** Уведомление обоим (для напоминаний) */
