@@ -123,11 +123,14 @@ Deno.test({ name: 'full flow + isolation', sanitizeOps: false, sanitizeResources
 
   // --- день рождения (ежегодно, дата в прошлом)
   await tap('A', 'add:ev:birthday', 0);
-  await text('A', 'Миша');
+  await text('A', 'Миша'); // на шаге «Чей?» текст не принимается — нужна кнопка
+  assert(lastTo('A')!.p.text.includes('Выбери вариант кнопкой'), 'who step requires button');
+  await tap('A', 'wz:v:1'); // 💞 Миша — название подставится само
   await text('A', '3 мая 1995');
   await tap('A', 'wz:skip');
   const [bd] = await sql`select * from p4t.events where kind = 'birthday'`;
   assertEquals(bd.yearly, true);
+  assertEquals([bd.title, Number(bd.person_id)], ['Миша', 222]);
 
   // --- B создаёт цель с начальной суммой
   mark = calls.length;
@@ -510,6 +513,212 @@ Deno.test({ name: 'admin: stats + broadcasts', sanitizeOps: false, sanitizeResou
   // C снова пишет боту — блокировка снимается
   await text('C', '/help');
   assertEquals((await sql`select blocked_at from p4t.users where tg_id = 333`)[0].blocked_at, null);
+  assert(st.includes('🎁 желания'), 'gift share in stats');
   if (Deno.env.get('DUMP')) Deno.writeTextFileSync(Deno.env.get('DUMP') + '.admin', calls.slice(0).filter((c) => c.p.chat_id === 900000001).map((c) => `${c.method}\n${c.p.text ?? ''}\n${JSON.stringify(c.p.reply_markup?.inline_keyboard?.map((r: any) => r.map((b: any) => b.text)) ?? '')}`).join('\n=====\n'));
+} });
+
+Deno.test({ name: 'gifts: secret marks, rights, isolation', sanitizeOps: false, sanitizeResources: false, fn: async () => {
+  const sql = db();
+  await sql`truncate p4t.couples, p4t.users, p4t.updates, p4t.sent, p4t.broadcasts, p4t.activity, p4t.reminder_deliveries restart identity cascade`;
+  const pair = async (x: string, y: string) => {
+    await text(x, '/addpart');
+    const [{ invite_code }] = await sql`select invite_code from p4t.couples where invite_code is not null`;
+    await text(y, `/join ${invite_code}`);
+    await tap(y, `pair:join:${invite_code}`, 0);
+    return await coupleOf(x);
+  };
+  const giftsStart = calls.length;
+  const ca = await pair('A', 'B');
+  const cc = await pair('C', 'D');
+  assert(ca && cc && ca !== cc);
+
+  // --- A добавляет желание через мастер; неверная ссылка не принимается
+  let mark = calls.length;
+  await tap('A', 'add:gift', 0);
+  await text('A', 'Наушники Sony');
+  await text('A', '15к');
+  await tap('A', 'wz:v:0'); // 🔥 Очень хочу
+  await text('A', 'просто текст');
+  assert(lastTo('A')!.p.text.includes('https://'), 'url validated');
+  await text('A', 'https://example.com/sony');
+  await text('A', 'Чёрные');
+  await tap('A', 'wz:v:0'); // категория — техника
+  await tap('A', 'wz:v:1'); // повод — день рождения
+  const [g1] = await sql`select * from p4t.gifts`;
+  assertEquals([Number(g1.owner_id), g1.title, Number(g1.price), g1.priority, g1.url, g1.note, g1.category, g1.occasion],
+    [111, 'Наушники Sony', 15000, 1, 'https://example.com/sony', 'Чёрные', 'tech', 'birthday']);
+  const gid = Number(g1.id);
+  // Проверка завершённости виджета: HTML действительно отправляется и обновляется через query.
+  const wmark = calls.length;
+  await text('B', '/gifts');
+  const giftWidget = calls.slice(wmark).find((item) => item.method === 'sendWidget' && item.p.chat_id === 222);
+  assert(giftWidget && giftWidget.p.html.includes('Подобрать по бюджету'), 'gift widget sent with budget filters');
+  assert(new TextEncoder().encode(giftWidget.p.chat_data).length <= 1024, 'gift widget payload limit');
+  const initialWidget = await wq('B', 'gw');
+  assert(initialWidget.p[2].some((x: any[]) => x[2].includes('Наушники Sony')), 'partner gift shown in widget');
+  const withinBudget = await wq('B', 'gb:15000');
+  assertEquals([withinBudget.f, withinBudget.p[1], withinBudget.p[2][0][4]], [15000, 1, 0]);
+  const belowBudget = await wq('B', 'gb:5000');
+  assertEquals([belowBudget.f, belowBudget.p[1], belowBudget.p[2].length], [5000, 0, 0]);
+  assert((await wq('B', 'gb:123')).err, 'reject budget not offered in the widget');
+  const randomMark = calls.length;
+  await wq('B', 'gx:15000');
+  assert(allText('B', randomMark).includes('Идея для подарка'), 'widget random picker opens gift card');
+  assert(allText('B', mark).includes('новое желание') && allText('B', mark).includes('Наушники Sony'), 'partner notified');
+
+  // --- B видит список A и тайно отмечает
+  mark = calls.length;
+  await tap('B', 'gf:l:p:0', 0);
+  assert(allText('B', mark).includes('Наушники Sony') && allText('B', mark).includes('ничего не выбрал'), allText('B', mark));
+  await tap('B', `gf:s:${gid}:p`, 0);
+  assertEquals((await sql`select giver_id::int, status from p4t.gift_plans`).map((r: any) => [r.giver_id, r.status]), [[222, 'picked']]);
+  // Персональное напоминание: запись видит только даритель, доставляется только ему.
+  const remindOn = addDays(localNow('Europe/Moscow').date, 1);
+  await tap('B', `gf:rem:${gid}`, 0);
+  await text('B', `${remindOn.slice(8, 10)}.${remindOn.slice(5, 7)}.${remindOn.slice(0, 4)}`);
+  assertEquals((await sql`select remind_on::text from p4t.gift_plans where gift_id = ${gid}`)[0].remind_on, remindOn);
+  const targetNow = new Date(`${remindOn}T12:00:00+03:00`);
+  await sql`update p4t.couples set remind_hour = 0 where id = ${ca}`;
+  await runReminders(targetNow);
+  const onlyGiver = await sql`select tg_id::int as id from p4t.reminder_deliveries where reminder_key like 'grem:%' order by tg_id`;
+  assertEquals(onlyGiver.map((r: any) => r.id), [222], 'gift reminder never goes to the wish owner');
+  const checkPrivate = (userId: number) => inCouple(ca, async (tx) =>
+    Number((await tx`select count(*)::int as n from p4t.reminder_deliveries where reminder_key like 'grem:%'`)[0].n), userId);
+  assertEquals([await checkPrivate(111), await checkPrivate(222)], [0, 1], 'RLS must hide personal gift reminders from wish owner');
+  const wb = await wq('B', `gs:${gid}:b`);
+  assertEquals(wb.p[2][0][4], 2, 'widget: bought');
+  assertEquals((await sql`select status from p4t.gift_plans`)[0].status, 'bought');
+
+  // --- A нигде не видит отметку: ни в тексте, ни в виджете, ни в главной
+  mark = calls.length;
+  const aw = await wq('A', 'gw');
+  await text('A', '/gifts');
+  await tap('A', 'gf:l:m:0', 0);
+  await tap('A', `gf:o:${gid}`, 0);
+  await text('A', '/home');
+  await db()`update p4t.users set widgets = false where tg_id = 111`;
+  await text('A', '/gifts');
+  await text('A', '/home');
+  await db()`update p4t.users set widgets = true where tg_id = 111`;
+  const seenA = [JSON.stringify(aw), ...calls.slice(mark).filter((c) => c.p.chat_id === 111)
+    .map((c) => [c.p.text, c.p.caption, c.p.chat_data, c.p.data, JSON.stringify(c.p.reply_markup ?? '')].join(' '))].join('\n');
+  for (const leak of ['🛍', 'куплено', 'купил(а) 1', 'Ты отметил', '· 🤫 выбрано']) assert(!seenA.includes(leak), 'owner sees mark: ' + leak);
+  assertEquals(aw.m[2][0].length, 4, 'own rows have no mark field');
+  assert(seenA.includes('Наушники Sony'), 'owner sees own wish');
+
+  // --- на уровне БД: отметки видит только даритель
+  const cnt = (who?: number) => inCouple(ca, async (tx) => Number((await tx`select count(*)::int n from p4t.gift_plans`)[0].n), who);
+  assertEquals([await cnt(111), await cnt(222), await cnt()], [0, 1, 0]);
+  let ownMark = false;
+  // на желании без чужой отметки, чтобы сработала именно политика, а не уникальный ключ
+  const [{ id: gx }] = await inCouple<any[]>(ca, (tx) => tx`insert into p4t.gifts (couple_id, owner_id, title) values (${ca}, 111, 'Проверка') returning id`, 111);
+  try { await inCouple(ca, (tx) => tx`insert into p4t.gift_plans (gift_id, couple_id, giver_id, status) values (${gx}, ${ca}, 111, 'picked')`, 111); } catch (e) { ownMark = /row-level security/.test(String(e)); }
+  let markForOther = false;
+  try { await inCouple(ca, (tx) => tx`insert into p4t.gift_plans (gift_id, couple_id, giver_id, status) values (${gx}, ${ca}, 222, 'picked')`, 111); } catch (e) { markForOther = /row-level security/.test(String(e)); }
+  assert(markForOther, 'cannot mark on behalf of partner');
+  await inCouple(ca, (tx) => tx`delete from p4t.gifts where id = ${gx}`, 111);
+  assert(ownMark, 'owner cannot mark own wish');
+  assert((await wq('A', `gs:${gid}:p`)).err, 'owner widget mark rejected');
+  // B не может менять и удалять чужое желание
+  assertEquals((await inCouple<any[]>(ca, (tx) => tx`update p4t.gifts set title = 'взлом' where id = ${gid} returning id`, 222)).length, 0);
+  assertEquals((await inCouple<any[]>(ca, (tx) => tx`delete from p4t.gifts where id = ${gid} returning id`, 222)).length, 0);
+  let fakeOwner = false;
+  try { await inCouple(ca, (tx) => tx`insert into p4t.gifts (couple_id, owner_id, title) values (${ca}, 111, 'чужое')`, 222); } catch (e) { fakeOwner = /row-level security/.test(String(e)); }
+  assert(fakeOwner, 'cannot create wish for partner');
+  await tap('B', `gf:d!:${gid}`, 0);
+  await tap('B', `gf:x:${gid}`, 0);
+  assertEquals((await sql`select title, received_at from p4t.gifts where id = ${gid}`)[0], { title: 'Наушники Sony', received_at: null });
+
+  // --- чужая пара ничего не видит и не может отметить
+  mark = calls.length;
+  await tap('C', `gf:o:${gid}`, 0);
+  assert(allText('C', mark).includes('не найдено') && !allText('C', mark).includes('Наушники'), 'foreign card hidden');
+  assert((await wq('C', `gs:${gid}:p`)).err, 'foreign mark rejected');
+  const wc = await wq('C', 'gw');
+  assert(!JSON.stringify(wc).includes('Наушники'), 'foreign widget clean');
+  assertEquals(await inCouple(cc, async (tx) => (await tx`select count(*)::int n from p4t.gifts`)[0].n, 333), 0);
+  assertEquals(Number((await sql`select count(*)::int n from p4t.gift_plans`)[0].n), 1);
+  // Большой список: widget data до 1024 байт, все записи остаются доступны через пагинацию.
+  for (let i = 0; i < 18; i++) {
+    await inCouple(cc, (tx) => tx`
+      insert into p4t.gifts (couple_id, owner_id, title, category, occasion)
+      values (${cc}, 333, ${'Длинный заголовок желания №' + i + ' — путешествие и впечатления'}, 'experience', 'anniversary')`, 333);
+  }
+  const largeWidget = await wq('D', 'gw');
+  assert(new TextEncoder().encode(JSON.stringify(largeWidget)).length <= 1024, 'large gift list widget response within byte limit');
+  assert(largeWidget.p[2].length > 0, 'large partner list renders');
+  let foreignGive = false;
+  try { foreignGive = (await inCouple<any[]>(cc, (tx) => tx`select p4t.gift_given(${gid}) as ok`, 333))[0].ok; } catch { /* */ }
+  assertEquals(foreignGive, false, 'foreign give rejected');
+
+  // --- напоминание о ДР A: B видит свои отметки, A — нет
+  await sql`update p4t.couples set remind_hour = 0`;
+  const bdDay = addDays(localNow('Europe/Moscow').date, 7);
+  await tap('A', 'add:ev:birthday', 0);
+  await tap('A', 'wz:v:0'); // 🙋 Мой
+  await text('A', `${bdDay.slice(8, 10)}.${bdDay.slice(5, 7)}.1995`);
+  await tap('A', 'wz:skip');
+  const [bdA] = await sql`select title, person_id::int as p from p4t.events where kind = 'birthday'`;
+  assertEquals([bdA.title, bdA.p], ['Аня', 111]);
+  await runReminders();
+  const rd = await sql`select tg_id::int as t, body, reply_markup from p4t.reminder_deliveries where reminder_key like 'r:%' order by tg_id`;
+  assertEquals(rd.length, 2);
+  assert(rd[1].body.includes('В списке желаний 1 идея') && rd[1].body.includes('купил(а) 1'), rd[1].body);
+  assert(!rd[0].body.includes('купил') && !rd[0].body.includes('выбрал'), 'birthday person sees no marks: ' + rd[0].body);
+  assert(JSON.stringify(rd[1].reply_markup).includes('gf:l:p:0') && JSON.stringify(rd[0].reply_markup).includes('gf:l:m:0'));
+
+  // --- A удаляет желание, которое B выбрал: B узнаёт тихо, A — ничего про отметку
+  await tap('A', 'add:gift', 0);
+  await text('A', 'Книга');
+  await tap('A', 'wz:skip');
+  await tap('A', 'wz:v:1');
+  await tap('A', 'wz:skip');
+  await tap('A', 'wz:skip');
+  await tap('A', 'wz:skip'); // категория по умолчанию
+  await tap('A', 'wz:skip'); // повод по умолчанию
+  const gid2 = Number((await sql`select id from p4t.gifts where title = 'Книга'`)[0].id);
+  await tap('B', `gf:s:${gid2}:p`, 0);
+  mark = calls.length;
+  await tap('A', `gf:d!:${gid2}`, 0);
+  const toB = calls.slice(mark).find((c) => c.p.chat_id === 222 && c.method === 'sendMessage');
+  assert(toB && toB.p.text.includes('Книга') && toB.p.text.includes('снята') && toB.p.disable_notification === true, 'giver told quietly');
+  assert(!allText('A', mark).includes('отметк'), 'owner not told about mark');
+  assertEquals(Number((await sql`select count(*)::int n from p4t.gifts where id = ${gid2}`)[0].n), 0);
+
+  // --- B дарит: A получает уведомление, желание переходит в полученные, отметка удаляется
+  mark = calls.length;
+  await tap('B', `gf:g:${gid}`, 0);
+  assert(allText('B', mark).includes('получит уведомление'), 'give confirm');
+  await tap('B', `gf:g!:${gid}`, 0);
+  assert(allText('A', mark).includes('<b>Миша</b> подарил(а) тебе «Наушники Sony»'), allText('A', mark));
+  const [got] = await sql`select received_at, given_by::int as g from p4t.gifts where id = ${gid}`;
+  assert(got.received_at && got.g === 222);
+  assertEquals(Number((await sql`select count(*)::int n from p4t.gift_plans`)[0].n), 0);
+  mark = calls.length;
+  await tap('A', 'gf:r:m:0', 0);
+  assert(allText('A', mark).includes('Наушники Sony'), 'received list');
+
+  // --- выход из пары: личные желания и отметки уходящего удаляются
+  await tap('B', 'add:gift', 0);
+  await text('B', 'Кроссовки');
+  await tap('B', 'wz:skip'); await tap('B', 'wz:v:1'); await tap('B', 'wz:skip'); await tap('B', 'wz:skip');
+  await tap('B', 'wz:skip'); await tap('B', 'wz:skip');
+  await tap('A', 'add:gift', 0);
+  await text('A', 'Духи');
+  await tap('A', 'wz:skip'); await tap('A', 'wz:v:1'); await tap('A', 'wz:skip'); await tap('A', 'wz:skip');
+  await tap('A', 'wz:skip'); await tap('A', 'wz:skip');
+  const gB = Number((await sql`select id from p4t.gifts where title = 'Кроссовки'`)[0].id);
+  const gA = Number((await sql`select id from p4t.gifts where title = 'Духи'`)[0].id);
+  await tap('A', `gf:s:${gB}:p`, 0);
+  await tap('B', `gf:s:${gA}:b`, 0);
+  assertEquals(Number((await sql`select count(*)::int n from p4t.gift_plans`)[0].n), 2);
+  await tap('B', 'pair:leave!', 0);
+  assertEquals(Number((await sql`select count(*)::int n from p4t.gifts where owner_id = 222`)[0].n), 0);
+  assertEquals(Number((await sql`select count(*)::int n from p4t.gift_plans`)[0].n), 0);
+  assertEquals(Number((await sql`select count(*)::int n from p4t.gifts where owner_id = 111`)[0].n), 2, 'A keeps own wishes');
+
+  const errs = calls.filter((c) => c.method === 'sendMessage' && /Ошибка|ошибка/.test(c.p.text));
+  assertEquals(errs.length, 0, 'no error messages: ' + errs.map((e) => e.p.text).join(' | '));
+  if (Deno.env.get('DUMP')) Deno.writeTextFileSync(Deno.env.get('DUMP') + '.gifts', calls.slice(giftsStart).filter((c) => ['sendMessage', 'editMessageText', 'sendWidget', 'answerWidgetQuery'].includes(c.method)).map((c) => `${c.method} → ${c.p.chat_id ?? ''}\n${c.p.text ?? c.p.caption ?? ''}\n${c.p.chat_data ?? c.p.data ?? ''}\n${JSON.stringify(c.p.reply_markup?.inline_keyboard?.map((r: any) => r.map((b: any) => b.text + '=' + (b.callback_data ?? b.url))) ?? '')}`).join('\n=====\n'));
   await closeDb();
 } });

@@ -162,6 +162,10 @@ export async function doLeave(c: Ctx) {
   const cid = c.couple.id;
   await db().begin(async (tx: Q) => {
     await tx`update p4t.users set couple_id = null, state = null, cards = '{}' where tg_id = ${c.u.tg_id}`;
+    // Личное уходит вместе с человеком: его список желаний и его тайные отметки на желаниях партнёра
+    await tx`delete from p4t.gifts where couple_id = ${cid} and owner_id = ${c.u.tg_id}`;
+    await tx`delete from p4t.gift_plans where couple_id = ${cid} and giver_id = ${c.u.tg_id}`;
+    await tx`update p4t.events set person_id = null where couple_id = ${cid} and person_id = ${c.u.tg_id}`;
     const [{ left }] = await tx`select count(*)::int as left from p4t.users where couple_id = ${cid}`;
     if (left === 0) await tx`delete from p4t.couples where id = ${cid}`;
   });

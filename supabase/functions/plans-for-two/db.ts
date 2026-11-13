@@ -25,11 +25,12 @@ export async function closeDb() {
   if (_sql) { await _sql.end({ timeout: 1 }); _sql = null; }
 }
 
-export async function inCouple<T>(coupleId: string, fn: (tx: Q) => Promise<T>): Promise<T> {
+/** userId — кто действует (p4t.me()): от него зависят права на желания и тайные отметки дарителя. */
+export async function inCouple<T>(coupleId: string, fn: (tx: Q) => Promise<T>, userId?: number): Promise<T> {
   if (!coupleId) throw new Error('no couple');
   let wrote = false;
   const res = await db().begin(async (tx: Q) => {
-    await tx`select set_config('p4t.couple', ${coupleId}, true)`;
+    await tx`select set_config('p4t.couple', ${coupleId}, true), set_config('p4t.user', ${userId ? String(userId) : ''}, true)`;
     await tx`set local role p4t_app`;
     const r = await fn(tx);
     // id транзакции назначается только при записи — так узнаём, что что-то изменилось

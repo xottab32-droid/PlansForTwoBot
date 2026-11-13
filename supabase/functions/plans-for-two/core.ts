@@ -51,13 +51,24 @@ export const TZS: [string, string][] = [
   ['Europe/Minsk', 'Минск'], ['Europe/Kyiv', 'Киев'], ['Asia/Almaty', 'Алматы'],
   ['Europe/Amsterdam', 'Амстердам / Берлин'], ['Europe/London', 'Лондон'], ['UTC', 'UTC'],
 ];
+/** Насколько хочется подарок: 1 — очень, 3 — было бы неплохо */
+export const PRIO: Record<string, [string, string]> = { 1: ['🔥', 'Очень хочу'], 2: ['🙂', 'Хочу'], 3: ['🤷', 'Было бы неплохо'] };
+/** Предмет желания: необязательная категория и повод. Фото/приватные идеи не используются. */
+export const GIFT_CATS: Record<string, [string, string]> = {
+  tech: ['📱', 'Техника'], clothes: ['👕', 'Одежда'], beauty: ['💄', 'Красота'],
+  home: ['🏠', 'Для дома'], experience: ['🎟️', 'Впечатления'], other: ['🎁', 'Другое'],
+};
+export const GIFT_OCCASIONS: Record<string, [string, string]> = {
+  any: ['✨', 'Без повода'], birthday: ['🎂', 'День рождения'],
+  anniversary: ['💞', 'Годовщина'], newyear: ['🎄', 'Новый год'],
+};
 export const CURRENCIES = ['₽', '€', '$', '₴', 'Br', '₸', 'zł'];
 
 export const MENU = {
   keyboard: [
     [{ text: '🏠 Главная' }, { text: '📅 Календарь' }],
     [{ text: '🎯 Цели' }, { text: '📍 Хочу сходить' }],
-    [{ text: '➕ Добавить' }, { text: '⚙️ Настройки' }],
+    [{ text: '🎁 Подарки' }, { text: '➕ Добавить' }, { text: '⚙️ Настройки' }],
   ],
   resize_keyboard: true, input_field_placeholder: 'Выбери раздел или напиши…',
 };
@@ -71,6 +82,7 @@ export const COMMANDS = [
   ['start', 'Запуск бота и главное меню'], ['help', 'Что умеет бот и все команды'], ['home', 'Главная карточка пары'],
   ['calendar', 'Общий календарь'], ['adddate', 'Добавить свидание или важную дату'], ['upcoming', 'Ближайшие события'],
   ['goals', 'Цели и накопления'], ['addgoal', 'Новая цель'], ['wishlist', 'Хочу сходить'], ['addwish', 'Добавить место или идею'],
+  ['gifts', 'Желания и подарки'], ['addgift', 'Добавить желание'],
   ['addpart', 'Пригласить партнёра'], ['join', 'Войти в пару по коду'], ['settings', 'Настройки'], ['name', 'Изменить своё имя'], ['support', 'Написать в поддержку'],
   ['cancel', 'Отменить ввод'],
 ].map(([command, description]) => ({ command, description }));
@@ -147,12 +159,16 @@ export async function show(c: Ctx, text: string, keyboard?: Kb, extra: Record<st
 }
 
 /** Уведомление второму партнёру (с учётом его настройки «без звука») */
-export async function notifyPartner(c: Ctx, text: string, keyboard?: Kb) {
+export async function notifyPartner(c: Ctx, text: string, keyboard?: Kb): Promise<boolean> {
   const p = partner(c);
-  if (!p) return;
+  if (!p) return false;
   try {
     await send(p.tg_id, text, keyboard, { disable_notification: p.quiet });
-  } catch (e) { await sendFailed(p.tg_id, e); }
+    return true;
+  } catch (e) {
+    await sendFailed(p.tg_id, e);
+    return false;
+  }
 }
 
 /** Уведомление обоим (для напоминаний) */
@@ -171,7 +187,7 @@ export async function sendFailed(tgId: number, e: unknown) {
   }
 }
 
-export const inC = (c: Ctx, fn: (tx: Q) => Promise<any>): Promise<any> => inCouple(c.couple!.id, fn);
+export const inC = (c: Ctx, fn: (tx: Q) => Promise<any>): Promise<any> => inCouple(c.couple!.id, fn, c.u.tg_id);
 
 export async function goalsWithSaved(tx: Q, archived = false) {
   const rows = await tx`
@@ -195,11 +211,13 @@ export async function goalById(tx: Q, id: number): Promise<Goal | null> {
 export type Ev = {
   id: number; kind: string; title: string; event_date: string; event_time: string | null; place: string | null;
   note: string | null; yearly: boolean; goal_id: number | null; wish_id: number | null; created_by: number;
+  /** чей день рождения (участник пары), null — другой человек */
+  person_id: number | null;
 };
 export async function allEvents(tx: Q): Promise<Ev[]> {
   const rows = await tx`
     select id, kind, title, event_date::text as event_date, to_char(event_time, 'HH24:MI') as event_time,
-           place, note, yearly, goal_id, wish_id, created_by
+           place, note, yearly, goal_id, wish_id, created_by, person_id
     from p4t.events order by event_date, event_time nulls first`;
   return rows.map(mapEv);
 }
@@ -209,18 +227,18 @@ export async function eventsForMonth(tx: Q, year: number, month: number): Promis
   const to = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
   const rows = await tx`
     select id, kind, title, event_date::text as event_date, to_char(event_time, 'HH24:MI') as event_time,
-      place, note, yearly, goal_id, wish_id, created_by from p4t.events
+      place, note, yearly, goal_id, wish_id, created_by, person_id from p4t.events
     where (not yearly and event_date >= ${from}::date and event_date < ${to}::date)
        or (yearly and extract(month from event_date) = ${month} and event_date < ${to}::date)
     order by event_date, event_time nulls first`;
   return rows.map(mapEv);
 }
 
-export const mapEv = (r: any): Ev => ({ ...r, id: Number(r.id), goal_id: r.goal_id ? Number(r.goal_id) : null, wish_id: r.wish_id ? Number(r.wish_id) : null, created_by: Number(r.created_by) });
+export const mapEv = (r: any): Ev => ({ ...r, id: Number(r.id), goal_id: r.goal_id ? Number(r.goal_id) : null, wish_id: r.wish_id ? Number(r.wish_id) : null, created_by: Number(r.created_by), person_id: r.person_id ? Number(r.person_id) : null });
 export async function eventById(tx: Q, id: number): Promise<Ev | null> {
   const [r] = await tx`
     select id, kind, title, event_date::text as event_date, to_char(event_time, 'HH24:MI') as event_time,
-           place, note, yearly, goal_id, wish_id, created_by
+           place, note, yearly, goal_id, wish_id, created_by, person_id
     from p4t.events where id = ${id}`;
   return r ? mapEv(r) : null;
 }

@@ -1,7 +1,7 @@
 import { allEvents, eventsForMonth, Ctx, Ev, evTitle, eventById, Goal, goalById, goalsWithSaved, inC, KINDS, memberName, nameOf, notifyPartner, pairTitle, partner, saveCards, saveState, show, WS } from './core.ts';
 import { num, Q } from './db.ts';
 import { answerWidget, b, Btn, del, kb, Kb, send, sendWidget } from './tg.ts';
-import { bar, cut, daysBetween, esc, fmtDate, fmtMoney, fmtShort, fmtShortDate, nextOccurrence, occursInMonth, pctOf, plural, quickAmounts, untilText, utf8len, yearsText } from './util.ts';
+import { bar, cut, daysBetween, esc, fitJson, fmtDate, fmtMoney, fmtShort, fmtShortDate, nextOccurrence, occursInMonth, pctOf, plural, quickAmounts, untilText, yearsText } from './util.ts';
 import { CAL_HTML, GOAL_HTML, HOME_HTML } from './widgets.ts';
 import { startWizard } from './wizard.ts';
 import { onboarding, joinPreview } from './pair_views.ts';
@@ -9,6 +9,8 @@ import { wishList } from './wish_views.ts';
 export * from './pair_views.ts';
 export * from './wish_views.ts';
 export * from './settings_views.ts';
+export * from './gift_views.ts';
+import { giftsHome, giftWidgetQuery } from './gift_views.ts';
 const cur = (c: Ctx) => c.couple!.currency;
 const money = (c: Ctx, n: number) => fmtMoney(n, cur(c));
 const navRow = (...extra: Btn[]): Btn[] => [...extra, b('🏠 Главная', 'nav:home')];
@@ -32,16 +34,18 @@ async function homeData(c: Ctx) {
     const evs = await allEvents(tx);
     const goals = await goalsWithSaved(tx);
     const [{ n }] = await tx`select count(*)::int as n from p4t.wishes where done_at is null`;
+    const [gf] = await tx`select count(*) filter (where owner_id = ${c.u.tg_id})::int as mine, count(*) filter (where owner_id <> ${c.u.tg_id})::int as theirs
+      from p4t.gifts where received_at is null`;
     const rel = evs.filter((e) => e.kind === 'relationship').sort((a, b) => a.event_date.localeCompare(b.event_date))[0];
     const together = rel && rel.event_date <= c.today ? daysBetween(rel.event_date, c.today) : null;
-    return { up: upcoming(evs, c.today).slice(0, 4), goals, wishes: n as number, rel, together };
+    return { up: upcoming(evs, c.today).slice(0, 4), goals, wishes: n as number, rel, together, gifts: [Number(gf.mine), Number(gf.theirs)] };
   });
 }
 
 function homeKb(c: Ctx): Kb {
   return kb(
     [b('📅 Календарь', 'nav:cal'), b('🎯 Цели', 'nav:goals'), b('📍 Хочу', 'nav:wish')],
-    [b('➕ Добавить', 'nav:add', 'primary'), b('⚙️', 'nav:set')],
+    [b('🎁 Подарки', 'nav:gift'), b('➕ Добавить', 'nav:add', 'primary'), b('⚙️', 'nav:set')],
     partner(c) ? [] : [b('💌 Пригласить партнёра', 'pair:new', 'success')],
   );
 }
@@ -77,14 +81,11 @@ function homeText(c: Ctx, h: Awaited<ReturnType<typeof homeData>>, notice: strin
     L.push(`${g.emoji} ${esc(g.title)} — <b>${p}%</b>${p >= 100 ? ' 🎉' : ''}`, `${bar(p)} ${fmtShort(g.saved)} из ${fmtShort(g.target)} ${cur(c)}`);
   }
   L.push('', `📍 Хочу сходить: <b>${h.wishes}</b> ${plural(h.wishes, 'место', 'места', 'мест')}`);
+  const p = partner(c);
+  L.push(`🎁 Желания: твои <b>${h.gifts[0]}</b>${p ? ` · ${nameOf(p)} <b>${h.gifts[1]}</b>` : ''}`);
   return L.join('\n');
 }
 
-function fitJson(o: any, shrink: (() => boolean)[]): string {
-  let s = JSON.stringify(o);
-  for (const f of shrink) { while (utf8len(s) > 1000 && f()) s = JSON.stringify(o); }
-  return s;
-}
 
 function homeWidgetJson(c: Ctx, h: Awaited<ReturnType<typeof homeData>>) {
   const o = {
@@ -95,6 +96,9 @@ function homeWidgetJson(c: Ctx, h: Awaited<ReturnType<typeof homeData>>) {
     e: h.up.slice(0, 3).map((e) => [e.id, KINDS[e.kind].e, cut(evTitle(e), 26), fmtShortDate(e.occ), untilText(e.days)]),
     g: h.goals.slice(0, 3).map((g) => [g.id, g.emoji, cut(g.title, 26), pctOf(g.saved, g.target), `${fmtShort(g.saved)} из ${fmtShort(g.target)} ${cur(c)}`]),
     w: h.wishes,
+    // желания: [мои, партнёра]; b — имя партнёра для подписи
+    f: partner(c) ? h.gifts : [h.gifts[0]],
+    b: partner(c) ? partner(c)!.first_name.slice(0, 24) : '',
   };
   return fitJson(o, [() => !!o.g.pop(), () => !!o.e.pop()]);
 }
@@ -186,6 +190,7 @@ export function addMenu(c: Ctx) {
     [b('💍 Годовщина', 'add:ev:anniversary'), b('❤️ Начало отношений', 'add:ev:relationship')],
     [b('⭐ Важная дата', 'add:ev:important'), b('✈️ Поездка', 'add:ev:trip')],
     [b('🎯 Цель накоплений', 'add:goal'), b('📍 Хочу сходить', 'add:wish')],
+    [b('🎁 Желание (подарок мне)', 'add:gift')],
     navRow(),
   ));
 }
@@ -236,35 +241,41 @@ export async function eventEditMenu(c: Ctx, id: number) {
     [b('Название', `ev:ef:${id}:title`), b('Дата', `ev:ef:${id}:date`)],
     [k.time ? b('Время', `ev:ef:${id}:time`) : null, k.place ? b('Место', `ev:ef:${id}:place`) : null],
     [b('Комментарий', `ev:ef:${id}:note`), b('Тип', `ev:ef:${id}:kind`)],
+    e.kind === 'birthday' ? [b('🎂 Чей день рождения', `ev:ef:${id}:who`)] : [],
     [b('‹ Назад', `ev:o:${id}`)],
   ));
 }
 
 export async function eventEditField(c: Ctx, id: number, field: string) {
-  if (!['title', 'date', 'time', 'place', 'note', 'kind'].includes(field)) return;
+  if (!['title', 'date', 'time', 'place', 'note', 'kind', 'who'].includes(field)) return;
   const e = await inC(c, (tx) => eventById(tx, id));
   if (!e) return await show(c, '🤷 Событие не найдено.', kb(navRow()));
-  await startWizard(c, 'ev', { kind: e.kind, title: e.title, date: e.event_date, time: e.event_time, place: e.place, note: e.note, goal: e.goal_id, wish: e.wish_id }, { only: field, id });
+  const who = e.person_id === c.u.tg_id ? 'me' : e.person_id && e.person_id === partner(c)?.tg_id ? 'p' : 'o';
+  await startWizard(c, 'ev', { kind: e.kind, title: e.title, date: e.event_date, time: e.event_time, place: e.place, note: e.note, goal: e.goal_id, wish: e.wish_id, who, person: e.person_id }, { only: field, id });
 }
 
 export async function finishEvent(c: Ctx, s: WS) {
   const d = s.d;
   const k = KINDS[d.kind] ?? KINDS.important;
-  const title = String(d.title ?? '').trim() || k.def || k.n;
+  // Свой день рождения или партнёра: название — имя, person_id — для подсказок про список желаний
+  const pm = d.kind !== 'birthday' ? null : d.who === 'me' ? c.u : d.who === 'p' ? partner(c) : null;
+  const person = d.kind !== 'birthday' ? null : pm ? pm.tg_id : d.who === 'o' ? null : d.person ?? null;
+  // имя подставляем при создании и при смене «чей», а своё название при редактировании не трогаем
+  const title = (pm && (!s.id || s.k === 'who') ? pm.first_name : String(d.title ?? '').trim()) || k.def || k.n;
   const time = k.time ? d.time ?? null : null;
   const place = k.place ? d.place ?? null : null;
   let id = s.id;
   const ok = await inC(c, async (tx) => {
     if (id) {
       const r = await tx`update p4t.events set kind = ${d.kind}, title = ${title}, event_date = ${d.date}, event_time = ${time},
-          place = ${place}, note = ${d.note ?? null}, yearly = ${k.yearly}, updated_at = now()
+          place = ${place}, note = ${d.note ?? null}, yearly = ${k.yearly}, person_id = ${person}, updated_at = now()
         where id = ${id} returning id`;
       return r.length > 0;
     }
     if (d.goal && !(await tx`select 1 from p4t.goals where id = ${d.goal}`).length) d.goal = null;
     if (d.wish && !(await tx`select 1 from p4t.wishes where id = ${d.wish}`).length) d.wish = null;
-    const [r] = await tx`insert into p4t.events (couple_id, kind, title, event_date, event_time, place, note, yearly, goal_id, wish_id, created_by)
-      values (${c.couple!.id}, ${d.kind}, ${title}, ${d.date}, ${time}, ${place}, ${d.note ?? null}, ${k.yearly}, ${d.goal ?? null}, ${d.wish ?? null}, ${c.u.tg_id})
+    const [r] = await tx`insert into p4t.events (couple_id, kind, title, event_date, event_time, place, note, yearly, goal_id, wish_id, created_by, person_id)
+      values (${c.couple!.id}, ${d.kind}, ${title}, ${d.date}, ${time}, ${place}, ${d.note ?? null}, ${k.yearly}, ${d.goal ?? null}, ${d.wish ?? null}, ${c.u.tg_id}, ${person})
       returning id`;
     id = Number(r.id);
     return true;
@@ -590,9 +601,12 @@ export async function widgetQuery(c: Ctx, data: string): Promise<{ answer: strin
   if (!c.couple) return { answer: J({ err: 'Ты больше не в паре. Нажми /start' }) };
   let m: RegExpExecArray | null;
   if (data === 'h') return { answer: homeWidgetJson(c, await homeData(c)) };
-  if ((m = /^o:([cgw])$/.exec(data))) {
-    return { answer: '{}', after: () => m![1] === 'c' ? calendar(c) : m![1] === 'g' ? goalsList(c) : wishList(c) };
+  if ((m = /^o:([cgwp])$/.exec(data))) {
+    const k = m[1];
+    return { answer: '{}', after: () => k === 'c' ? calendar(c) : k === 'g' ? goalsList(c) : k === 'p' ? giftsHome(c) : wishList(c) };
   }
+  const gq = await giftWidgetQuery(c, data);
+  if (gq) return gq;
   if ((m = /^e:(\d{1,12})$/.exec(data))) return { answer: '{}', after: () => eventCard(c, Number(m![1])) };
   if ((m = /^g:(\d{1,12})$/.exec(data))) return { answer: '{}', after: () => goalCard(c, Number(m![1])) };
   if ((m = /^m:(\d{4})-(\d{2})$/.exec(data))) {

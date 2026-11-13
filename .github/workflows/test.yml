@@ -14,7 +14,7 @@ jobs:
           deno-version: v2.x
       - run: deno check supabase/functions/plans-for-two/index.ts tests/integration_test.ts
       - run: deno lint supabase/functions/plans-for-two
-      - run: deno test supabase/functions/plans-for-two/util_test.ts
+      - run: deno test supabase/functions/plans-for-two/util_test.ts tests/widget_test.ts
 
   integration:
     runs-on: ubuntu-latest

@@ -2,6 +2,7 @@
 // Не отмечаем уведомление доставленным до успешного ответа Telegram.
 import { allEvents, Couple, evTitle, KINDS, mapUser, UserRow } from './core.ts';
 import { db, inCouple, Q } from './db.ts';
+import { birthdayHint } from './gift_views.ts';
 import { b, kb, send, TgError } from './tg.ts';
 import { addDays, daysBetween, esc, fmtDate, localNow, nextOccurrence, plural, untilText, yearsText } from './util.ts';
 
@@ -11,7 +12,7 @@ async function claim(tx: Q, coupleId: string, key: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-type Msg = { key: string; text: string; kb?: ReturnType<typeof kb> };
+type Msg = { key: string; text: string; kb?: ReturnType<typeof kb>; /** день рождения участника пары */ person?: number; /** личное напоминание (никому другому!) */ recipient?: number };
 
 export async function runReminders(now = new Date()) {
   const sql = db();
@@ -20,7 +21,7 @@ export async function runReminders(now = new Date()) {
   const couples: Couple[] = await sql`
     select cp.* from p4t.couples cp
     where exists (select 1 from p4t.users u where u.couple_id = cp.id)
-      and exists (
+      and (exists (
         select 1 from p4t.events e
         where e.couple_id = cp.id and (
           (not e.yearly and e.event_date between (${now}::timestamptz at time zone cp.tz)::date - 1
@@ -33,7 +34,11 @@ export async function runReminders(now = new Date()) {
               and (${now}::timestamptz at time zone cp.tz)::date - e.event_date > 0
               and mod((${now}::timestamptz at time zone cp.tz)::date - e.event_date, 100) = 0)
         )
-      )`;
+      ) or exists (
+        select 1 from p4t.gift_plans gp
+        where gp.couple_id = cp.id
+          and gp.remind_on = (${now}::timestamptz at time zone cp.tz)::date
+      ))`;
   let queued = 0;
   for (const cp of couples) {
     try { queued += await coupleReminders(cp, now); }
@@ -72,7 +77,8 @@ async function coupleReminders(cp: Couple, now: Date): Promise<number> {
         if (cp.remind_days.includes(days) && ln.hour >= cp.remind_hour && await claim(tx, cp.id, remKey)) {
           const when = days === 0 ? 'Сегодня' : days === 1 ? 'Завтра' : untilText(days).replace(/^ч/, 'Ч');
           const t = e.event_time ? ` в ${String(e.event_time).slice(0, 5)}` : '';
-          out.push({ key: remKey, text: `🔔 <b>${when}</b>${days > 1 ? ` (${fmtDate(occ.date, { wd: true })})` : t}: ${k.e} ${title}${yrs}${e.place ? `\n📍 ${esc(e.place)}` : ''}`, kb: open });
+          const person = e.kind === 'birthday' && days > 0 && e.person_id && members.some((m) => m.tg_id === e.person_id) ? e.person_id : undefined;
+          out.push({ key: remKey, text: `🔔 <b>${when}</b>${days > 1 ? ` (${fmtDate(occ.date, { wd: true })})` : t}: ${k.e} ${title}${yrs}${e.place ? `\n📍 ${esc(e.place)}` : ''}`, kb: open, person });
         }
         if (days === 0 && e.event_time) {
           const [h, m] = String(e.event_time).split(':').map(Number);
@@ -102,12 +108,45 @@ async function coupleReminders(cp: Couple, now: Date): Promise<number> {
       }
     }
 
+    // Напоминания о конкретных подарках — только их дарителю.
+    // Читаем приватные планы с серверным соединением, но не включаем их
+    // в сообщения партнёру и не возвращаем в общий контекст.
+    if (ln.hour >= cp.remind_hour) {
+      const plans = await db()`
+        select gp.gift_id, gp.giver_id, g.title
+        from p4t.gift_plans gp join p4t.gifts g on g.id = gp.gift_id
+        where gp.couple_id = ${cp.id}
+          and gp.remind_on = ${ln.date}::date and g.received_at is null`;
+      for (const plan of plans) {
+        const recipient = Number(plan.giver_id);
+        if (!members.some((m) => m.tg_id === recipient)) continue;
+        const key = `grem:${plan.gift_id}:${ln.date}:${recipient}`;
+        if (await claim(tx, cp.id, key)) {
+          out.push({ key, recipient,
+            text: `🎁 Ты планировал(а) подарок «${esc(plan.title)}». Самое время проверить покупку и подготовить сюрприз.`,
+            kb: kb([b('Открыть подарок', `gf:o:${plan.gift_id}`)]),
+          });
+        }
+      }
+    }
+
     // Обе записи находятся в одной транзакции: p4t.sent + очередь получателей.
     // Ошибка постановки в очередь откатит отметку в sent.
     for (const msg of out) for (const member of members) {
+      if (msg.recipient && msg.recipient !== member.tg_id) continue;
+      let body = msg.text, markup = msg.kb ?? null;
+      if (msg.person) {
+        // Личная подсказка: даритель видит только свои отметки, именинник — только про свой список
+        const pn = members.find((m) => m.tg_id === msg.person)?.first_name ?? '';
+        body += await birthdayHint(cp.id, msg.person, member.tg_id, pn, cp.currency);
+        if (members.length > 1) {
+          markup = kb([b('Открыть', `ev:o:${msg.key.split(':')[1]}`, 'primary'),
+            member.tg_id === msg.person ? b('🎁 Мои желания', 'gf:l:m:0') : b('🎁 Желания', 'gf:l:p:0')]);
+        }
+      }
       await tx`insert into p4t.reminder_deliveries
         (couple_id, reminder_key, tg_id, body, reply_markup)
-        values (${cp.id}, ${msg.key}, ${member.tg_id}, ${msg.text}, ${JSON.stringify(msg.kb ?? null)}::jsonb)
+        values (${cp.id}, ${msg.key}, ${member.tg_id}, ${body}, ${JSON.stringify(markup)}::jsonb)
         on conflict (couple_id, reminder_key, tg_id) do nothing`;
     }
   });
