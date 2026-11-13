@@ -249,6 +249,17 @@ Deno.test({ name: 'full flow + isolation', sanitizeOps: false, sanitizeResources
     where body like '%Контроль повторной доставки%' order by tg_id`;
   assertEquals(delivery2.map((r: any) => [r.tg_id, r.status]), [[111, 'sent'], [222, 'sent']]);
 
+
+  // Запуск на заданную будущую дату использует эту дату и в SQL-отборе пар.
+  const simulatedNow = new Date(Date.now() + 45 * 86400000);
+  const simulatedTomorrow = addDays(localNow('Europe/Moscow', simulatedNow).date, 1);
+  await sql`insert into p4t.events (couple_id, kind, title, event_date, created_by)
+    values (${ca}, 'important', 'Симулированное напоминание', ${simulatedTomorrow}, 111)`;
+  await runReminders(simulatedNow);
+  const simulatedDelivery = await sql`select tg_id::int as tg_id, status from p4t.reminder_deliveries
+    where body like '%Симулированное напоминание%' order by tg_id`;
+  assertEquals(simulatedDelivery.map((r: any) => [r.tg_id, r.status]), [[111, 'sent'], [222, 'sent']]);
+
   // --- Цели/места не обрезаются после восьмой записи и дают перейти на следующую страницу.
   for (let i = 0; i < 12; i++) {
     await sql`insert into p4t.goals (couple_id, title, target, created_by)

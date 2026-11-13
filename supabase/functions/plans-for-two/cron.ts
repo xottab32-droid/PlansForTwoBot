@@ -23,15 +23,15 @@ export async function runReminders(now = new Date()) {
       and exists (
         select 1 from p4t.events e
         where e.couple_id = cp.id and (
-          (not e.yearly and e.event_date between (now() at time zone cp.tz)::date - 1
-            and (now() at time zone cp.tz)::date + 14)
+          (not e.yearly and e.event_date between (${now}::timestamptz at time zone cp.tz)::date - 1
+            and (${now}::timestamptz at time zone cp.tz)::date + 14)
           or (e.yearly and extract(month from e.event_date) in (
-            extract(month from (now() at time zone cp.tz)::date),
-            extract(month from (now() at time zone cp.tz)::date + 14)
+            extract(month from (${now}::timestamptz at time zone cp.tz)::date),
+            extract(month from (${now}::timestamptz at time zone cp.tz)::date + 14)
           ))
           or (e.kind = 'relationship'
-              and (now() at time zone cp.tz)::date - e.event_date > 0
-              and mod((now() at time zone cp.tz)::date - e.event_date, 100) = 0)
+              and (${now}::timestamptz at time zone cp.tz)::date - e.event_date > 0
+              and mod((${now}::timestamptz at time zone cp.tz)::date - e.event_date, 100) = 0)
         )
       )`;
   let queued = 0;
