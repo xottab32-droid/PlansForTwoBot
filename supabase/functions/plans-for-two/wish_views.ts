@@ -1,5 +1,5 @@
 import { CATS, Ctx, inC, memberName, nameOf, notifyPartner, show, WS } from './core.ts';
-import { b, Btn, kb, u } from './tg.ts';
+import { b, Btn, kb } from './tg.ts';
 import { cut, esc, fmtDate, fmtShortDate } from './util.ts';
 import { startWizard } from './wizard.ts';
 import { onboarding } from './pair_views.ts';

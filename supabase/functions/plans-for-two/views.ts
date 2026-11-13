@@ -1,6 +1,6 @@
 import { allEvents, eventsForMonth, Ctx, Ev, evTitle, eventById, Goal, goalById, goalsWithSaved, inC, KINDS, memberName, nameOf, notifyPartner, pairTitle, partner, saveCards, saveState, show, WS } from './core.ts';
 import { num, Q } from './db.ts';
-import { answerWidget, b, Btn, del, kb, Kb, send, sendWidget, u } from './tg.ts';
+import { answerWidget, b, Btn, del, kb, Kb, send, sendWidget } from './tg.ts';
 import { bar, cut, daysBetween, esc, fmtDate, fmtMoney, fmtShort, fmtShortDate, nextOccurrence, occursInMonth, pctOf, plural, quickAmounts, untilText, utf8len, yearsText } from './util.ts';
 import { CAL_HTML, GOAL_HTML, HOME_HTML } from './widgets.ts';
 import { startWizard } from './wizard.ts';

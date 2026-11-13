@@ -23,12 +23,27 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-      - run: supabase start
-      - name: Integration tests against local Supabase, never production
+      - name: Start local PostgreSQL (no production connection or Docker image pull)
+        run: |
+          sudo systemctl start postgresql
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "alter user postgres with password 'postgres';"
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "create role anon; create role authenticated; create role service_role;"
+      - name: Apply app schema and local cron stubs
         env:
-          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          PGPASSWORD: postgres
+        run: |
+          set -e
+          for migration in \
+            supabase/migrations/20261112190000_p4t_init.sql \
+            tests/ci_cron_stub.sql \
+            supabase/migrations/20261113100000_p4t_admin.sql \
+            supabase/migrations/20261114100000_p4t_display_name.sql \
+            supabase/migrations/20261115100000_p4t_function_url.sql \
+            supabase/migrations/20261116100000_p4t_delivery_reliability.sql; do
+            psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Integration tests against local PostgreSQL only
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
           PLANS_BOT_TOKEN: test
         run: deno test -A tests/integration_test.ts
