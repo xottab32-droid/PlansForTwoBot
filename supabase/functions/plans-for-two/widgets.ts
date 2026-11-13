@@ -138,19 +138,27 @@ draw(W?J(W.chatData):null);bg('as',draw);if(W)W.onEvent('activated',()=>bg('as',
 export const GIFT_HTML = page(
   `.sg{display:flex;gap:4px;margin-bottom:8px}.sg button{flex:1;padding:6px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sg .on{background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color)}.q{display:flex;gap:6px;margin-top:10px}.q button{flex:1}
-.r{cursor:pointer}.p.o{background:none;color:var(--tg-theme-link-color);box-shadow:inset 0 0 0 1px var(--tg-theme-link-color)}.p.b{background:#34c759;color:#fff}`,
+.r{cursor:pointer}.p.o{background:none;color:var(--tg-theme-link-color);box-shadow:inset 0 0 0 1px var(--tg-theme-link-color)}.p.b{background:#34c759;color:#fff}
+.bg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:5px 0 8px}.bg button{min-width:0;padding:7px 1px;font-size:.75em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bg .on{background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color)}`,
   `let T=0;const PS=['＋ отметить','🤫 выбрал','🛍 купил'],NX=['p','b','n'];
 function row(x,t){const r=el('div','r',null,A);el('span',null,x[1],r);el('b',null,x[2],r);if(x[3])el('span','m',x[3],r);r.onclick=()=>{hap();ask('go:'+x[0])};
 if(t){const s=el('span','p'+(x[4]===2?' b':x[4]?'':' o'),PS[x[4]],r);s.onclick=e=>{e.stopPropagation();hap();ask('gs:'+x[0]+':'+NX[x[4]],draw)}}}
 function draw(s){if(!s)return;if(s.m)S=s;if(!S){if(s.err){A.textContent='';el('div','e',s.err,A)}return}A.textContent='';if(!S.p)T=0;
 if(S.p){const tb=el('div','sg',null,A);['🙋 Мои','💞 '+S.b].forEach((x,i)=>{el('button',i===T?'on':null,x,tb).onclick=()=>{hap();T=i;draw({})}})}
 else el('div','k','Мои желания',A);
-const d=T?S.p:S.m;if(d[0])el('div','m',d[0],A);if(s.err)el('div','e',s.err,A);
+const d=T?S.p:S.m;
+if(T){el('div','k','Подобрать по бюджету',A);const filters=el('div','bg',null,A),chosen=S.f||0;
+[['Все',0],...(S.q||[]).map(n=>['до '+(n>=1000?Math.round(n/1000)+'к':n)+(S.cc||''),n])].forEach(x=>{
+el('button',chosen===x[1]?'on':null,x[0],filters).onclick=()=>{hap();ask('gb:'+x[1],draw)}});
+}
+if(d[0])el('div','m',d[0],A);if(s.err)el('div','e',s.err,A);
 if(!d[2].length)el('div','m',T?S.b+' пока ничего не добавил(а) — можно намекнуть 😉':'Добавь, что хочешь получить в подарок — с ценой и ссылкой',A);
 d[2].forEach(x=>row(x,T));
 const f=el('div','q',null,A);if(!T)el('button',null,'➕ Добавить',f).onclick=()=>{hap();ask('ga')};
+if(T&&d[1])el('button',null,'🎲 Случайный',f).onclick=()=>{hap();ask('gx:'+(S.f||0))};
 if(d[1])el('button',null,'📋 Все ('+d[1]+') ›',f).onclick=()=>{hap();ask('gl:'+(T?'p':'m'))};
 el('div','m',T?'🤫 '+S.b+' не видит твои отметки «выбрал» и «купил»':(S.p?S.b+' видит список, но не видит, что выбрано':'Партнёр увидит список, когда присоединится'),A).style.marginTop='8px';
 if(W)W.ready()}
-draw(W?J(W.chatData):null);bg('gw',draw);if(W)W.onEvent('activated',()=>bg('gw',draw));`,
+draw(W?J(W.chatData):null);bg('gw',draw);
+if(W)W.onEvent('activated',()=>bg(S&&S.f?'gb:'+S.f:'gw',draw));`,
 );
