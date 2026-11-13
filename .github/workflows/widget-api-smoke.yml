@@ -1,0 +1,39 @@
+name: Widget API handshake
+on:
+  push:
+    branches:
+      - feature/android-couple-widgets
+    paths:
+      - 'supabase/functions/plans-widget/**'
+      - '.github/workflows/widget-api-smoke.yml'
+  workflow_dispatch:
+jobs:
+  handshake:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify protected widget API registration
+        env:
+          API_URL: https://ccqbxfspjmlzizzznsuz.supabase.co/functions/v1/plans-widget
+        run: |
+          python3 - <<'PY'
+          import os, json, secrets, urllib.request, urllib.error
+          api=os.environ['API_URL']
+          def call(body):
+              req=urllib.request.Request(api, data=json.dumps(body).encode(),headers={'Content-Type':'application/json'},method='POST')
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as response:
+                      return response.status,json.loads(response.read())
+              except urllib.error.HTTPError as e:
+                  return e.code,json.loads(e.read())
+          code=secrets.token_hex(24)
+          token=secrets.token_hex(32)
+          status,data=call({'action':'register','code':code,'token':token})
+          assert status==200 and data.get('status')=='pending', (status,data)
+          status,data=call({'action':'snapshot','token':token})
+          assert status==200 and data.get('status')=='pending', (status,data)
+          status,data=call({'action':'snapshot','token':secrets.token_hex(32)})
+          assert status==401, (status,data)
+          print('PASS: register pending; unlinked device cannot access pair data; unknown token rejected')
+          PY
