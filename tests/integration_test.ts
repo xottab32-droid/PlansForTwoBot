@@ -334,13 +334,12 @@ Deno.test({ name: 'full flow + isolation', sanitizeOps: false, sanitizeResources
   }
   for (const cmd of ['/help', '/home', '/calendar', '/upcoming', '/goals', '/wishlist', '/settings', '/cancel', '🏠 Главная', '📅 Календарь']) await text('A', cmd);
 
-  // --- переход «Желания и подарки» в главном виджете должен отправлять новый виджет,
-  // а под ним должна оставаться запасная кнопка, даже если widget_query не сработает.
+  // --- переход «Желания и подарки» работает внутри главного виджета без резервной кнопки под ним.
   await db()`update p4t.users set widgets = true where tg_id = 111`;
   mark = calls.length;
   await text('A', '/home');
   const hwMsg = calls.slice(mark).find((c) => c.method === 'sendWidget' && c.p.chat_id === 111)!;
-  assert(hwMsg?.p.reply_markup?.inline_keyboard?.flat().some((b: any) => b.callback_data === 'nav:gift'), 'home widget has gift fallback button');
+  assert(hwMsg && !hwMsg.p.reply_markup, 'home widget has no redundant navigation buttons');
   const giftNavMark = calls.length;
   const opened = await wq('A', 'o:p');
   assertEquals(opened.opened, 'widget', 'home widget navigation acknowledges real delivery');

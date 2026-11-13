@@ -58,10 +58,8 @@ export async function home(c: Ctx, notice = '') {
     // Текстовое сообщение-уведомление (например, «ввод отменён») заменяем, затем шлём живую карточку
     if (c.target) { await del(c.chat, c.target); c.target = undefined; }
     if (notice) await send(c.chat, notice);
-    // Резервный переход через Telegram callback: запросы из HTML-виджета могут быть недоступны/ограничены клиентом.
-    const wk = partner(c)
-      ? kb([b('🎁 Подарки', 'nav:gift')])
-      : kb([b('🎁 Подарки', 'nav:gift'), b('💌 Пригласить партнёра', 'pair:new', 'success')]);
+    // Навигация в раздел подарков работает внутри HTML-виджета; под главной оставляем только приглашение без партнёра.
+    const wk = partner(c) ? undefined : kb([b('💌 Пригласить партнёра', 'pair:new', 'success')]);
     return await sendCard(c, 'home', HOME_HTML, `💞 <b>${pairTitle(c)}</b>\n${esc(t)}`, homeWidgetJson(c, h), wk, () => send(c.chat, homeText(c, h, ''), homeKb(c)));
   }
   await show(c, homeText(c, h, notice), homeKb(c));
