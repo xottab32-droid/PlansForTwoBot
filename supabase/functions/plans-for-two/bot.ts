@@ -4,6 +4,7 @@ import { answerCb, answerWidget, api, b, Callback, edit, kb, Message, send, Upda
 import * as V from './views.ts';
 import * as W from './wizard.ts';
 import * as A from './admin.ts';
+import { attachWidgetDevice, revokeWidgetDevices } from './widget_link.ts';
 
 const MENU_LABELS: Record<string, (c: Ctx) => Promise<unknown>> = {
   '🏠 Главная': (c) => V.home(c),
@@ -32,6 +33,8 @@ async function dropWizard(c: Ctx, keepMsg?: number) {
 async function command(c: Ctx, cmd: string, arg: string) {
   switch (cmd) {
     case 'start': {
+      const widget = /^w_([a-f0-9]{48})$/.exec(arg);
+      if (widget) return await attachWidgetDevice(c,widget[1]);
       const j = /^j_([A-Za-z0-9]{8})$/.exec(arg);
       if (j) return await V.joinPreview(c, j[1]);
       if (c.couple) {
@@ -40,6 +43,7 @@ async function command(c: Ctx, cmd: string, arg: string) {
       }
       return await V.onboarding(c);
     }
+    case 'widget_revoke': return await revokeWidgetDevices(c);
     case 'help': return await V.help(c);
     case 'home': return await V.home(c);
     case 'calendar': return await V.calendar(c);

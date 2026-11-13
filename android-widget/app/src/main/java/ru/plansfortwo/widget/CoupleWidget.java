@@ -169,7 +169,7 @@ final class WidgetArt {
             float dx=(float)Math.cos(radians),dy=(float)Math.sin(radians);
             float x=wdp/2f,y=hdp/2f,scale=Math.max(wdp,hdp)/2f;
             back.setShader(new LinearGradient(x-dx*scale,y-dy*scale,x+dx*scale,y+dy*scale,bg1,bg2,Shader.TileMode.CLAMP));
-        }else back.setColor(bg1);
+        }else {back.setColor(bg1);back.setAlpha(a);}
         c.drawRoundRect(new RectF(0,0,wdp,hdp),Math.min(22,hdp/4f),Math.min(22,hdp/4f),back);
         Paint edge=new Paint(Paint.ANTI_ALIAS_FLAG); edge.setStyle(Paint.Style.STROKE);
         edge.setStrokeWidth(1); edge.setColor(Color.argb(Math.round(a*.26f),255,255,255));
