@@ -12,7 +12,7 @@ async function claim(tx: Q, coupleId: string, key: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-type Msg = { key: string; text: string; kb?: ReturnType<typeof kb>; /** день рождения участника пары: личная подсказка про подарки */ person?: number };
+type Msg = { key: string; text: string; kb?: ReturnType<typeof kb>; /** день рождения участника пары */ person?: number; /** личное напоминание (никому другому!) */ recipient?: number };
 
 export async function runReminders(now = new Date()) {
   const sql = db();
@@ -21,7 +21,7 @@ export async function runReminders(now = new Date()) {
   const couples: Couple[] = await sql`
     select cp.* from p4t.couples cp
     where exists (select 1 from p4t.users u where u.couple_id = cp.id)
-      and exists (
+      and (exists (
         select 1 from p4t.events e
         where e.couple_id = cp.id and (
           (not e.yearly and e.event_date between (${now}::timestamptz at time zone cp.tz)::date - 1
@@ -34,7 +34,11 @@ export async function runReminders(now = new Date()) {
               and (${now}::timestamptz at time zone cp.tz)::date - e.event_date > 0
               and mod((${now}::timestamptz at time zone cp.tz)::date - e.event_date, 100) = 0)
         )
-      )`;
+      ) or exists (
+        select 1 from p4t.gift_plans gp
+        where gp.couple_id = cp.id
+          and gp.remind_on = (${now}::timestamptz at time zone cp.tz)::date
+      ))`;
   let queued = 0;
   for (const cp of couples) {
     try { queued += await coupleReminders(cp, now); }
@@ -104,9 +108,32 @@ async function coupleReminders(cp: Couple, now: Date): Promise<number> {
       }
     }
 
+    // Напоминания о конкретных подарках — только их дарителю.
+    // Читаем приватные планы с серверным соединением, но не включаем их
+    // в сообщения партнёру и не возвращаем в общий контекст.
+    if (ln.hour >= cp.remind_hour) {
+      const plans = await db()`
+        select gp.gift_id, gp.giver_id, g.title
+        from p4t.gift_plans gp join p4t.gifts g on g.id = gp.gift_id
+        where gp.couple_id = ${cp.id}
+          and gp.remind_on = ${ln.date}::date and g.received_at is null`;
+      for (const plan of plans) {
+        const recipient = Number(plan.giver_id);
+        if (!members.some((m) => m.tg_id === recipient)) continue;
+        const key = `grem:${plan.gift_id}:${ln.date}:${recipient}`;
+        if (await claim(tx, cp.id, key)) {
+          out.push({ key, recipient,
+            text: `🎁 Ты планировал(а) подарок «${esc(plan.title)}». Самое время проверить покупку и подготовить сюрприз.`,
+            kb: kb([b('Открыть подарок', `gf:o:${plan.gift_id}`)]),
+          });
+        }
+      }
+    }
+
     // Обе записи находятся в одной транзакции: p4t.sent + очередь получателей.
     // Ошибка постановки в очередь откатит отметку в sent.
     for (const msg of out) for (const member of members) {
+      if (msg.recipient && msg.recipient !== member.tg_id) continue;
       let body = msg.text, markup = msg.kb ?? null;
       if (msg.person) {
         // Личная подсказка: даритель видит только свои отметки, именинник — только про свой список

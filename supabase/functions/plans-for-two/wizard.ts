@@ -107,6 +107,12 @@ const GIFT_STEPS: Step[] = [
     show: (v) => GIFT_OCCASIONS[v]?.join(' ') ?? 'Без повода' },
 ];
 
+const GIFT_REMINDER_STEPS: Step[] = [
+  { key: 'date', label: 'Когда напомнить', type: 'date',
+    q: () => 'Когда напомнить тебе о выбранном подарке? Выбери будущую дату.',
+    check: (v, _d, c) => v > c.today ? null : 'Выбери дату начиная с завтрашнего дня' },
+];
+
 const JOIN_STEPS: Step[] = [
   { key: 'code', label: 'Код', type: 'text', max: 20, q: () => 'Введи код приглашения от партнёра (8 символов, например K7M2-QX9P).' },
 ];
@@ -124,6 +130,7 @@ export const FLOWS: Record<string, Flow> = {
   top: { title: (s) => (s.d.sign > 0 ? '➕ Пополнение: ' : '➖ Снятие: ') + `${s.d.emoji ?? ''} ${s.d.gtitle ?? ''}`, steps: TOP_STEPS, done: (c, s) => V.finishTopUp(c, s) },
   wish: { title: (s) => s.id ? '✏️ Изменение записи' : '📍 Хочу сходить', steps: WISH_STEPS, done: (c, s) => V.finishWish(c, s) },
   gift: { title: (s) => s.id ? '✏️ Изменение желания' : '🎁 Новое желание', steps: GIFT_STEPS, done: (c, s) => V.finishGift(c, s) },
+  giftrem: { title: () => '⏰ Напоминание о подарке', steps: GIFT_REMINDER_STEPS, done: (c, s) => V.finishGiftReminder(c, s) },
   join: { title: () => '🔑 Вход по коду', steps: JOIN_STEPS, done: (c, s) => V.finishJoin(c, s) },
   name: { title: () => '✏️ Твоё имя', steps: NAME_STEPS, done: (c, s) => V.finishName(c, s), cancel: (c) => V.settings(c, '✖️ Имя не изменено.') },
 };

@@ -13,7 +13,7 @@ import { sendCard } from './views.ts';
 type Gift = {
   id: number; owner_id: number; title: string; price: number | null; priority: number; url: string | null; note: string | null;
   category: string; occasion: string;
-  received_at: Date | null; given_by: number | null; created_at: Date;
+  received_at: Date | null; given_by: number | null; created_at: Date; remind_on: string | null;
   /** отметка текущего пользователя (только на чужих желаниях) */
   st: 'picked' | 'bought' | null;
 };
@@ -39,7 +39,7 @@ function mapGift(c: Ctx, r: any): Gift {
 
 async function giftsOf(c: Ctx, tx: Q, owner: number, received: boolean, limit: number, offset = 0, budget = 0): Promise<Gift[]> {
   const rows = await tx`
-    select g.id, g.owner_id, g.title, g.price, g.priority, g.category, g.occasion, g.url, g.note, g.received_at, g.given_by, g.created_at, p.status as st
+    select g.id, g.owner_id, g.title, g.price, g.priority, g.category, g.occasion, g.url, g.note, g.received_at, g.given_by, g.created_at, p.status as st, p.remind_on::text as remind_on
     from p4t.gifts g left join p4t.gift_plans p on p.gift_id = g.id
     where g.owner_id = ${owner} and (g.received_at is not null) = ${received}
       and (${budget} = 0 or (g.price is not null and g.price <= ${budget}))
@@ -141,7 +141,7 @@ export async function giftList(c: Ctx, w: W, page = 0, received = false) {
 
 async function giftById(c: Ctx, tx: Q, id: number): Promise<Gift | null> {
   const [r] = await tx`
-    select g.id, g.owner_id, g.title, g.price, g.priority, g.category, g.occasion, g.url, g.note, g.received_at, g.given_by, g.created_at, p.status as st
+    select g.id, g.owner_id, g.title, g.price, g.priority, g.category, g.occasion, g.url, g.note, g.received_at, g.given_by, g.created_at, p.status as st, p.remind_on::text as remind_on
     from p4t.gifts g left join p4t.gift_plans p on p.gift_id = g.id where g.id = ${id}`;
   return r ? mapGift(c, r) : null;
 }
@@ -177,6 +177,11 @@ export async function giftCard(c: Ctx, id: number, notice = '') {
       b(g.st === 'bought' ? '• 🛍 Купил(а)' : '🛍 Купил(а)', `gf:s:${id}:b`),
     ]);
     rows.push([b('🎁 Подарил(а)', `gf:g:${id}`, 'success'), g.st ? b('Снять отметку', `gf:s:${id}:n`) : null].filter(Boolean) as Btn[]);
+    if (g.st) {
+      if (g.remind_on) L.push(`⏰ Личное напоминание: ${esc(g.remind_on)}`);
+      rows.push([b(g.remind_on ? '⏰ Изменить напоминание' : '⏰ Напомнить мне', `gf:rem:${id}`),
+        g.remind_on ? b('✖️ Отменить', `gf:remoff:${id}`) : null].filter(Boolean) as Btn[]);
+    }
   }
   const w = mine ? 'm' : 'p';
   rows.push([g.received_at ? b('‹ Подаренное', `gf:r:${w}:0`) : b('‹ К списку', `gf:l:${w}:0`), b('🏠 Главная', 'nav:home')]);
@@ -358,6 +363,35 @@ export async function giftBudgetMenu(c: Ctx) {
       [b('‹ К желаниям', 'gf:l:p:0')]));
 }
 
+/** Личное напоминание только для пользователя, который выбрал подарок. */
+export async function giftReminderStart(c: Ctx, id: number) {
+  if (!c.couple) return await onboarding(c);
+  const g = await inC(c, (tx) => giftById(c, tx, id));
+  if (!g || g.owner_id === c.u.tg_id || !g.st || g.received_at) return await notFound(c);
+  await startWizard(c, 'giftrem', { gift: id });
+}
+
+export async function finishGiftReminder(c: Ctx, s: WS) {
+  const id = Number(s.d.gift);
+  if (!Number.isSafeInteger(id) || id <= 0) return;
+  const rows = await inC(c, (tx) => tx`
+    update p4t.gift_plans set remind_on = ${s.d.date}::date, updated_at = now()
+    where gift_id = ${id} and giver_id = ${c.u.tg_id}
+    returning gift_id`);
+  if (!rows.length) return await notFound(c);
+  await giftCard(c, id, '⏰ Личное напоминание сохранено. Партнёр не увидит его.');
+}
+
+export async function giftReminderCancel(c: Ctx, id: number) {
+  if (!c.couple) return await onboarding(c);
+  const rows = await inC(c, (tx) => tx`
+    update p4t.gift_plans set remind_on = null, updated_at = now()
+    where gift_id = ${id} and giver_id = ${c.u.tg_id}
+    returning gift_id`);
+  if (!rows.length) return await notFound(c);
+  await giftCard(c, id, '⏰ Напоминание отменено.');
+}
+
 /** Маршрутизация кнопок gf:* */
 export async function giftRoute(c: Ctx, p: string[]) {
   if (p[1] === 'budget') return await giftBudgetMenu(c);
@@ -376,6 +410,8 @@ export async function giftRoute(c: Ctx, p: string[]) {
     case 's': return await giftPlan(c, id, p[3]);
     case 'g': return await giftGiveConfirm(c, id);
     case 'g!': return await giftGive(c, id);
+    case 'rem': return await giftReminderStart(c, id);
+    case 'remoff': return await giftReminderCancel(c, id);
     case 'x': return await giftReceived(c, id, true);
     case 'u': return await giftReceived(c, id, false);
     case 'e': return await giftEditMenu(c, id);

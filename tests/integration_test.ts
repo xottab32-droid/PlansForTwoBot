@@ -572,6 +572,16 @@ Deno.test({ name: 'gifts: secret marks, rights, isolation', sanitizeOps: false, 
   assert(allText('B', mark).includes('Наушники Sony') && allText('B', mark).includes('ничего не выбрал'), allText('B', mark));
   await tap('B', `gf:s:${gid}:p`, 0);
   assertEquals((await sql`select giver_id::int, status from p4t.gift_plans`).map((r: any) => [r.giver_id, r.status]), [[222, 'picked']]);
+  // Персональное напоминание: запись видит только даритель, доставляется только ему.
+  const remindOn = addDays(localNow('Europe/Moscow').date, 1);
+  await tap('B', `gf:rem:${gid}`, 0);
+  await text('B', `${remindOn.slice(8, 10)}.${remindOn.slice(5, 7)}.${remindOn.slice(0, 4)}`);
+  assertEquals((await sql`select remind_on::text from p4t.gift_plans where gift_id = ${gid}`)[0].remind_on, remindOn);
+  const targetNow = new Date(`${remindOn}T12:00:00+03:00`);
+  await sql`update p4t.couples set remind_hour = 0 where id = ${ca}`;
+  await runReminders(targetNow);
+  const onlyGiver = await sql`select tg_id::int as id from p4t.reminder_deliveries where reminder_key like 'grem:%' order by tg_id`;
+  assertEquals(onlyGiver.map((r: any) => r.id), [222], 'gift reminder never goes to the wish owner');
   const wb = await wq('B', `gs:${gid}:b`);
   assertEquals(wb.p[2][0][4], 2, 'widget: bought');
   assertEquals((await sql`select status from p4t.gift_plans`)[0].status, 'bought');
