@@ -111,7 +111,7 @@ supabase/
     20261112200753_p4t_display_name.sql    своё имя (users.display_name)
     20261112220246_p4t_function_url.sql    адрес функции для pg_cron берётся из p4t.config
     20261113060143_p4t_delivery_reliability.sql  состояния webhook и очередь напоминаний с повторными попытками
-    20261113120000_p4t_retry_limits.sql    статус failed: лимиты повторов
+    20261113083751_p4t_retry_limits.sql    статус failed: лимиты повторов
   functions/plans-for-two/
     index.ts     HTTP: вебхук, ?cron, ?broadcast, ?bootstrap
     bot.ts       маршрутизация команд, кнопок и запросов виджетов
