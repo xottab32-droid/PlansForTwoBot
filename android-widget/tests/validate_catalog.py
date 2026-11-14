@@ -35,3 +35,17 @@ for receiver in receivers:
     assert len(labels) >= 2 and any("дней" in (label or "") for label in labels), size
 assert found == expected, (found, expected)
 print("OK: 9 distinct widgets, correct grid sizes, nonempty previews")
+
+# Regression: pinning must not send a custom bitmap RemoteViews to One UI.
+java=root/"java"/"ru"/"plansfortwo"/"widget"
+activity=(java/"MainActivity.java").read_text(encoding="utf-8")
+widget=(java/"CoupleWidget.java").read_text(encoding="utf-8")
+pin_code=activity.split("private void pinSelectedWidget()",1)[1].split("private void redrawPreview()",1)[0]
+assert "new ComponentName(this,size.provider)" in pin_code
+assert "requestPinAppWidget(provider,null,callback)" in pin_code
+assert "extras.putParcelable" not in pin_code
+assert "ACTION_PIN_SUCCEEDED" in pin_code
+assert "ACTION_PIN_SUCCEEDED.equals(intent.getAction())" in widget
+assert "AppWidgetManager.EXTRA_APPWIDGET_ID" in widget
+assert "render(context,manager,widgetId)" in widget
+print("OK: safe pinning with size-specific provider and confirmed render")
