@@ -44,6 +44,8 @@ public class MainActivity extends Activity {
     private String previewColorKey;
     private int previewColorValue;
     private boolean ready=false, pickerDirty=false;
+    private LinearLayout connectionScreen, settingsScreen;
+    private boolean returningFromTelegram=false, verifying=false;
     private int wallpaperStyle=0;
     private static final int DARK=Color.rgb(18,23,39);
     private static final int[] ANGLES={0,90,180,270,45,135,225,315};
@@ -51,7 +53,23 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
         prefs=Api.prefs(this);
+        // Keep the setup flow and the widget editor on completely separate screens.
+        LinearLayout appRoot=new LinearLayout(this);
+        appRoot.setOrientation(LinearLayout.VERTICAL);
+        appRoot.setBackgroundColor(DARK);
+        connectionScreen=new LinearLayout(this);
+        connectionScreen.setOrientation(LinearLayout.VERTICAL);
+        connectionScreen.setGravity(Gravity.CENTER_VERTICAL);
+        connectionScreen.setPadding(dp(24),dp(24),dp(24),dp(24));
+        appRoot.addView(connectionScreen,new LinearLayout.LayoutParams(-1,-1));
+        body=connectionScreen;
+        title("♥  Планы на двоих",26);
+        status=note("");
+        status.setVisibility(View.GONE);
+        button("Привязать Telegram",v->connect());
+        button("Проверить привязку и обновить",v->refresh(true));
         LinearLayout screen=new LinearLayout(this);
+        settingsScreen=screen;
         screen.setOrientation(LinearLayout.VERTICAL);
         screen.setBackgroundColor(DARK);
         ScrollView scroll=new ScrollView(this);
@@ -65,7 +83,9 @@ public class MainActivity extends Activity {
         fixed.setPadding(dp(18),dp(8),dp(18),0);
         screen.addView(fixed,new LinearLayout.LayoutParams(-1,-2));
         screen.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
-        setContentView(screen);
+        screen.setVisibility(View.GONE);
+        appRoot.addView(screen,new LinearLayout.LayoutParams(-1,-1));
+        setContentView(appRoot);
         body=fixed;
         title("♥  Планы на двоих",24);
         section("Предпросмотр на рабочем столе");
@@ -82,10 +102,6 @@ public class MainActivity extends Activity {
         fp.setMargins(0,dp(4),0,dp(6));
         body.addView(frame,fp);
         body=scrollBody;
-        section("Подключение");
-        status=note("");
-        button("Привязать Telegram",v->connect());
-        button("Проверить привязку и обновить",v->refresh(true));
         note("Размер для предпросмотра (высота × ширина)");
         String[] names=new String[WidgetCatalog.ALL.length];
         for(int i=0;i<names.length;i++)names[i]=WidgetCatalog.ALL[i].title();
@@ -184,17 +200,38 @@ public class MainActivity extends Activity {
         showPanel(0);
         updateButtons();
         updateStatus();
+        showAppropriateScreen();
         redrawPreview();
         // One UI 9 can use dynamic previews; all nine also have XML fallbacks.
-        WidgetCatalog.updatePickerPreviews(this);
+        if(isLinked())WidgetCatalog.updatePickerPreviews(this);
     }
     @Override protected void onResume(){
         super.onResume();
-        if(ready)updateStatus();
+        if(!ready)return;
+        updateStatus();
+        showAppropriateScreen();
+        if(returningFromTelegram && !isLinked() && !verifying) {
+            returningFromTelegram=false;
+            refresh(true);
+        }
     }
     @Override protected void onPause(){
         super.onPause();
         if(pickerDirty){WidgetCatalog.updatePickerPreviews(this);pickerDirty=false;}
+    }
+    /** A generated token is only a pending request. Only a verified server snapshot unlocks settings. */
+    private boolean isLinked(){
+        if(prefs.getString("token","").isEmpty())return false;
+        try {
+            JSONObject snapshot=new JSONObject(prefs.getString("snapshot","{}"));
+            return "ready".equals(snapshot.optString("status"));
+        }catch(Exception e){return false;}
+    }
+    private void showAppropriateScreen(){
+        if(connectionScreen==null || settingsScreen==null)return;
+        boolean linked=isLinked();
+        connectionScreen.setVisibility(linked?View.GONE:View.VISIBLE);
+        settingsScreen.setVisibility(linked?View.VISIBLE:View.GONE);
     }
     private int dp(float px){return Math.round(px*getResources().getDisplayMetrics().density);}
     private void showPanel(int index){
@@ -348,8 +385,9 @@ public class MainActivity extends Activity {
         if(status==null)return;
         String token=prefs.getString("token","");
         String snapshot=prefs.getString("snapshot","");
-        if(token.isEmpty()){status.setText("Не подключено. Для получения дат нужна привязка к боту.");return;}
-        if(snapshot.isEmpty()){status.setText("Код создан. Запусти бота в Telegram, затем вернись и проверь привязку.");return;}
+        if(token.isEmpty()){status.setText("");status.setVisibility(View.GONE);return;}
+        status.setVisibility(View.VISIBLE);
+        if(!isLinked()){status.setText("Запусти бота в Telegram, затем проверь привязку.");return;}
         long when=prefs.getLong("last_auto",0);
         String date=when==0?"неизвестно":new SimpleDateFormat("dd.MM.yyyy HH:mm",Locale.getDefault()).format(new Date(when));
         status.setText("Подключено. Данные обновлены: "+date);
@@ -365,9 +403,13 @@ public class MainActivity extends Activity {
                 prefs.edit().putString("token",token).putString("code",code)
                     .remove("snapshot").remove("last_auto").apply();
                 runOnUiThread(()->{
-                    updateStatus();redraw();
+                    updateStatus();
+                    showAppropriateScreen();
                     Intent telegram=CoupleWidget.telegramIntent(this,"w_"+code);
-                    if(telegram!=null)startActivity(telegram);else toast("Не удалось открыть Telegram");
+                    if(telegram!=null) {
+                        returningFromTelegram=true;
+                        startActivity(telegram);
+                    }else toast("Не удалось открыть Telegram");
                 });
             }catch(Exception e){
                 runOnUiThread(()->{status.setText("Ошибка привязки: "+e.getMessage());toast(e.getMessage());});
@@ -375,19 +417,37 @@ public class MainActivity extends Activity {
         },"widget-register").start();
     }
     private void refresh(boolean force){
-        if(force){
-            if(prefs.getString("token","").isEmpty()){toast("Сначала подключи Telegram");return;}
+        if(verifying)return;
+        if(prefs.getString("token","").isEmpty()){toast("Сначала нажми «Привязать Telegram»");return;}
+        // Checking a pending link does not consume the one-minute *data refresh* quota.
+        boolean linked=isLinked();
+        if(force && linked){
             int wait=Api.reserveManual(this);
             if(wait>0){toast("Обновить снова можно через "+wait+" сек.");return;}
             if(wait<0){toast("Не удалось запустить обновление");return;}
         }
-        status.setText("Проверяю подключение и данные…");
+        verifying=true;
+        status.setVisibility(View.VISIBLE);
+        status.setText("Проверяю подключение…");
         new Thread(()->{
             try{
                 Api.fetch(this,force);
-                runOnUiThread(()->{updateStatus();redraw();toast("Данные обновлены");});
+                runOnUiThread(()->{
+                    verifying=false;
+                    returningFromTelegram=false;
+                    updateStatus();
+                    showAppropriateScreen();
+                    redraw();
+                    WidgetCatalog.updatePickerPreviews(this);
+                    toast("Данные обновлены");
+                });
             }catch(Exception e){
-                runOnUiThread(()->{status.setText(e.getMessage());toast(e.getMessage());});
+                runOnUiThread(()->{
+                    verifying=false;
+                    status.setVisibility(View.VISIBLE);
+                    status.setText(e.getMessage());
+                    toast(e.getMessage());
+                });
             }
         },"widget-refresh").start();
     }
