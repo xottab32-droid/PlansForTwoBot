@@ -1,6 +1,8 @@
 package ru.plansfortwo.widget;
 
 import android.app.Activity;
+import android.appwidget.AppWidgetManager;
+import android.content.ComponentName;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -22,6 +24,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
+import android.widget.RemoteViews;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -37,7 +40,7 @@ public class MainActivity extends Activity {
     private ImageView preview;
     private WallpaperSample sampleWallpaper;
     private SharedPreferences prefs;
-    private Button bg1Button,bg2Button,textButton,iconButton,wallpaperButton;
+    private Button bg1Button,bg2Button,textButton,iconButton,wallpaperButton,addWidgetButton;
     private Button[] tabs=new Button[3];
     private LinearLayout[] panels=new LinearLayout[3];
     private Spinner bgMode,direction,previewSize;
@@ -109,9 +112,13 @@ public class MainActivity extends Activity {
         for(int i=0;i<names.length;i++)names[i]=WidgetCatalog.ALL[i].title();
         previewSize=spinner(names,7);
         previewSize.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){
-            @Override public void onItemSelected(AdapterView<?> a,View v,int pos,long id){if(ready)redrawPreview();}
+            @Override public void onItemSelected(AdapterView<?> a,View v,int pos,long id){
+                if(ready){redrawPreview();updateAddWidgetButton();}
+            }
             @Override public void onNothingSelected(AdapterView<?> a){}
         });
+        addWidgetButton=button("Добавить виджет на главный экран",v->pinSelectedWidget());
+        updateAddWidgetButton();
         wallpaperButton=button("Сменить фон предпросмотра",v->{
             wallpaperStyle=(wallpaperStyle+1)%3;
             sampleWallpaper.invalidate();
@@ -305,15 +312,53 @@ public class MainActivity extends Activity {
     private JSONObject snapshot(){
         try {return new JSONObject(prefs.getString("snapshot","{}"));}catch(Exception e){return new JSONObject();}
     }
+    private WidgetCatalog.Size selectedSize() {
+        int index=previewSize.getSelectedItemPosition();
+        if(index<0 || index>=WidgetCatalog.ALL.length)index=7;
+        return WidgetCatalog.ALL[index];
+    }
+    private void updateAddWidgetButton(){
+        if(addWidgetButton!=null)
+            addWidgetButton.setText("Добавить виджет "+selectedSize().title()+" на главный экран");
+    }
+    /** Ask the current launcher to pin exactly the provider selected in the preview. */
+    private void pinSelectedWidget() {
+        if(!isLinked()){
+            toast("Сначала привяжи Telegram");
+            return;
+        }
+        AppWidgetManager manager=AppWidgetManager.getInstance(this);
+        if(!manager.isRequestPinAppWidgetSupported()){
+            toast("One UI не разрешает добавлять виджеты из приложения. Добавь виджет вручную через рабочий стол.");
+            return;
+        }
+        WidgetCatalog.Size size=selectedSize();
+        // The size-specific provider defines targetCellWidth and targetCellHeight
+        // so the launcher can offer the exact grid span shown in the preview.
+        ComponentName provider=new ComponentName(this,size.provider);
+        JSONObject data=snapshot();
+        if(data.optString("relationship_start").isEmpty())data=WidgetCatalog.demo();
+        RemoteViews pinPreview=new RemoteViews(getPackageName(),size.layout);
+        pinPreview.setImageViewBitmap(R.id.bg,
+            WidgetArt.draw(this,prefs,data,size.width,size.height,size.mode));
+        Bundle extras=new Bundle();
+        extras.putParcelable(AppWidgetManager.EXTRA_APPWIDGET_PREVIEW,pinPreview);
+        try{
+            boolean accepted=manager.requestPinAppWidget(provider,extras,null);
+            if(!accepted)toast("Не удалось открыть добавление виджета. Попробуй через меню виджетов One UI.");
+            // accepted means only that the launcher received the request, not that
+            // the user confirmed. The provider's onUpdate renders after placement.
+        }catch(RuntimeException error){
+            toast("Не удалось открыть добавление виджета. Добавь его через рабочий стол.");
+        }
+    }
     private void redrawPreview(){
         if(!ready)return;
         JSONObject data=snapshot();
         boolean demo=data.optString("relationship_start").isEmpty();
         if(demo)data=WidgetCatalog.demo();
         previewNote.setText(demo?"Пример данных · прозрачность видна на фоне ниже":"Реальные данные пары · прозрачность видна на фоне ниже");
-        int index=previewSize.getSelectedItemPosition();
-        if(index<0||index>=WidgetCatalog.ALL.length)index=7;
-        WidgetCatalog.Size s=WidgetCatalog.ALL[index];
+        WidgetCatalog.Size s=selectedSize();
         preview.setImageBitmap(WidgetArt.draw(this,prefs,data,s.width,s.height,s.mode,previewColorKey,previewColorValue));
     }
     private void redraw(){
