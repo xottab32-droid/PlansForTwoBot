@@ -32,8 +32,23 @@ import java.util.Locale;
 public class CoupleWidget extends AppWidgetProvider {
     static final String BOT = "PlansForTwoBot";
     private static final String ACTION_REFRESH = "ru.plansfortwo.widget.REFRESH_NOW";
+    static final String ACTION_PIN_SUCCEEDED = "ru.plansfortwo.widget.PIN_SUCCEEDED";
 
     @Override public void onReceive(Context context, Intent intent) {
+        if(intent!=null && ACTION_PIN_SUCCEEDED.equals(intent.getAction())) {
+            int widgetId=intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
+            if(widgetId!=AppWidgetManager.INVALID_APPWIDGET_ID) {
+                AppWidgetManager manager=AppWidgetManager.getInstance(context);
+                android.appwidget.AppWidgetProviderInfo info=manager.getAppWidgetInfo(widgetId);
+                if(info!=null && context.getPackageName().equals(info.provider.getPackageName())) {
+                    try { render(context,manager,widgetId); }
+                    catch(RuntimeException ex) {
+                        android.util.Log.e("PlansForTwoWidget","Pinned widget rendering error",ex);
+                    }
+                }
+            }
+            return;
+        }
         if(intent!=null && ACTION_REFRESH.equals(intent.getAction())) {
             Context c=context.getApplicationContext();
             if(Api.prefs(c).getString("token","").isEmpty()) {
