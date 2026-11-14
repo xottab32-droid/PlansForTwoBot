@@ -30,6 +30,8 @@ jobs:
       - name: Build APK
         working-directory: android-widget
         run: gradle --no-daemon :app:assembleDebug --stacktrace
+      - name: Check widget catalog and previews
+        run: python3 android-widget/tests/validate_catalog.py
       - name: Check built APK
         run: test -s android-widget/app/build/outputs/apk/debug/app-debug.apk
       - name: Upload test APK
