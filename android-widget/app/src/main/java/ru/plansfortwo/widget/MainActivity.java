@@ -227,6 +227,8 @@ public class MainActivity extends Activity {
         if(!ready)return;
         updateStatus();
         showAppropriateScreen();
+        // Recover any widget that One UI has not yet repainted after pinning.
+        if(isLinked() && CoupleWidget.hasWidgets(this))CoupleWidget.redrawAll(this);
         if(returningFromTelegram && !isLinked() && !verifying) {
             returningFromTelegram=false;
             refresh(true);

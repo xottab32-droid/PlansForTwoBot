@@ -62,6 +62,7 @@ public final class WidgetCatalog {
                 // Keep the bitmap compact for RemoteViews/Binder and scale in the picker.
                 int w=s.width,h=s.height;
                 view.setImageViewBitmap(R.id.bg,WidgetArt.draw(c,p,data,w,h,s.mode));
+                view.setViewVisibility(R.id.loading,android.view.View.GONE);
                 manager.setWidgetPreview(new ComponentName(c,s.provider),
                     AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN,view);
             } catch(Exception ignored) { /* XML previewLayout is the reliable fallback. */ }

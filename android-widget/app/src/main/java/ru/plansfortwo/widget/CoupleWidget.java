@@ -47,6 +47,9 @@ public class CoupleWidget extends AppWidgetProvider {
                     }
                 }
             }
+            // Some launchers deliver the pin callback before the widget host is ready.
+            // Independently repaint all widgets after the host finishes placement.
+            WidgetSyncJob.scheduleInitialRefresh(context);
             return;
         }
         if(intent!=null && ACTION_REFRESH.equals(intent.getAction())) {
@@ -72,12 +75,17 @@ public class CoupleWidget extends AppWidgetProvider {
     }
 
     @Override public void onUpdate(Context context, AppWidgetManager manager, int[] ids) {
-        for (int id : ids) render(context, manager, id);
+        for (int id : ids) {
+            try { render(context,manager,id); }
+            catch(RuntimeException e) { android.util.Log.e("PlansForTwoWidget","Initial draw failed for "+id,e); }
+        }
         WidgetSyncJob.schedule(context);
+        WidgetSyncJob.scheduleInitialRefresh(context);
     }
     @Override public void onEnabled(Context c) {
         super.onEnabled(c);
         WidgetSyncJob.schedule(c);
+        WidgetSyncJob.scheduleInitialRefresh(c);
     }
     @Override public void onDisabled(Context c) {
         super.onDisabled(c);
@@ -85,7 +93,8 @@ public class CoupleWidget extends AppWidgetProvider {
     }
     @Override public void onAppWidgetOptionsChanged(Context c, AppWidgetManager m, int id, Bundle opts) {
         super.onAppWidgetOptionsChanged(c,m,id,opts);
-        render(c,m,id);
+        try { render(c,m,id); }
+        catch(RuntimeException e){android.util.Log.e("PlansForTwoWidget","Resize draw failed for "+id,e);}
     }
     static boolean hasWidgets(Context c) {
         AppWidgetManager m=AppWidgetManager.getInstance(c);
@@ -96,7 +105,10 @@ public class CoupleWidget extends AppWidgetProvider {
     static void redrawAll(Context c) {
         AppWidgetManager m=AppWidgetManager.getInstance(c);
         for(WidgetCatalog.Size s:WidgetCatalog.ALL)
-            for(int id:m.getAppWidgetIds(new ComponentName(c,s.provider)))render(c,m,id);
+            for(int id:m.getAppWidgetIds(new ComponentName(c,s.provider))) {
+                try { render(c,m,id); }
+                catch(RuntimeException e){android.util.Log.e("PlansForTwoWidget","Repaint failed for "+id,e);}
+            }
     }
     static String telegramPackage(Context c) {
         PackageManager pm = c.getPackageManager();
@@ -119,9 +131,16 @@ public class CoupleWidget extends AppWidgetProvider {
     }
     static void render(Context c, AppWidgetManager manager, int id) {
         SharedPreferences p=Api.prefs(c);
-        Bundle opts=manager.getAppWidgetOptions(id);
         android.appwidget.AppWidgetProviderInfo info=manager.getAppWidgetInfo(id);
-        WidgetCatalog.Size size=WidgetCatalog.find(info==null?"":info.provider.getClassName());
+        // One UI may assign an ID before its metadata becomes available.
+        // The one-shot initial refresh will retry after placement.
+        if(info==null){
+            android.util.Log.w("PlansForTwoWidget","Widget metadata not ready: "+id);
+            return;
+        }
+        Bundle opts=manager.getAppWidgetOptions(id);
+        if(opts==null)opts=Bundle.EMPTY;
+        WidgetCatalog.Size size=WidgetCatalog.find(info.provider.getClassName());
         int width=opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,size.width);
         int height=opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,size.height);
         if(width<=0)width=size.width;
@@ -143,6 +162,7 @@ public class CoupleWidget extends AppWidgetProvider {
         Bitmap bmp=WidgetArt.draw(c,p,data,width,height,mode);
         RemoteViews rv=new RemoteViews(c.getPackageName(),layout);
         rv.setImageViewBitmap(R.id.bg,bmp);
+        rv.setViewVisibility(R.id.loading,View.GONE);
         PendingIntent main=activity(c,10000+id,new Intent(c,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         Intent deep=telegramIntent(c,null);
         PendingIntent telegram=deep==null?main:activity(c,20000+id,deep);

@@ -49,3 +49,24 @@ assert "ACTION_PIN_SUCCEEDED.equals(intent.getAction())" in widget
 assert "AppWidgetManager.EXTRA_APPWIDGET_ID" in widget
 assert "render(context,manager,widgetId)" in widget
 print("OK: safe pinning with size-specific provider and confirmed render")
+
+# Ensure every initial layout has visible content before One UI performs its first update.
+layout_names = {"widget_1","widget_row2","widget_row3","widget_vert2","widget_vert3","widget_big"}
+for layout_name in layout_names:
+    layout = ET.parse(root / "res/layout" / (layout_name+".xml")).getroot()
+    background = [n for n in layout.iter() if n.get(a+"id") == "@+id/bg"]
+    loading = [n for n in layout.iter() if n.get(a+"id") == "@+id/loading"]
+    assert len(background) == 1 and background[0].get(a+"src") == "@drawable/widget_loading_background", layout_name
+    assert len(loading) == 1 and loading[0].get(a+"text"), layout_name
+assert (root / "res/drawable/widget_loading_background.xml").is_file()
+java = root / "java/ru/plansfortwo/widget"
+provider = (java / "CoupleWidget.java").read_text(encoding="utf-8")
+sync = (java / "WidgetSyncJob.java").read_text(encoding="utf-8")
+catalog = (java / "WidgetCatalog.java").read_text(encoding="utf-8")
+assert "setViewVisibility(R.id.loading,View.GONE)" in provider
+assert "setViewVisibility(R.id.loading,android.view.View.GONE)" in catalog
+assert "scheduleInitialRefresh(context)" in provider
+assert "scheduleInitialRefresh(c)" in provider
+assert "params.getJobId()==INITIAL_JOB_ID" in sync
+assert "CoupleWidget.redrawAll(getApplicationContext())" in sync
+print("OK: first-layout fallback and one-shot redraw retry for One UI")
