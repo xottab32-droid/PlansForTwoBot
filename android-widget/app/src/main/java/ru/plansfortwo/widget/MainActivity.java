@@ -102,7 +102,7 @@ public class MainActivity extends Activity {
             final int index=i;
             Button tab=new Button(this);
             tab.setText(navNames[i]);
-            tab.setAllCaps(false);tab.setTextSize(12);
+            tab.setAllCaps(false);tab.setTextSize(14);
             tab.setOnClickListener(v->showPanel(index));
             nav.addView(tab,new LinearLayout.LayoutParams(0,-1,1));
             tabs[i]=tab;
@@ -119,7 +119,7 @@ public class MainActivity extends Activity {
         bgMode=spinner(new String[]{"Градиент","Сплошной цвет"},prefs.getBoolean("gradient",true)?0:1);
         bgMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){
             @Override public void onItemSelected(AdapterView<?> a,View v,int pos,long id){
-                if(ready)save("gradient",pos==0);
+                if(ready){save("gradient",pos==0);updateButtons();}
             }
             @Override public void onNothingSelected(AdapterView<?> a){}
         });
