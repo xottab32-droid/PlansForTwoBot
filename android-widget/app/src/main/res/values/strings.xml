@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="widget_description">Ближайшее свидание, важная дата и дни вместе</string>
+    <string name="widget_label_1x2">Планы на двоих 1×2</string>
+    <string name="widget_description_1x2">1×2: Дни вместе</string>
+    <string name="widget_label_1x3">Планы на двоих 1×3</string>
+    <string name="widget_description_1x3">1×3: Дни вместе, свидание и событие</string>
+    <string name="widget_label_1x4">Планы на двоих 1×4</string>
+    <string name="widget_description_1x4">1×4: Дни вместе, свидание и событие</string>
+    <string name="widget_label_2x2">Планы на двоих 2×2</string>
+    <string name="widget_description_2x2">2×2: Дни вместе и свидание</string>
+    <string name="widget_label_2x3">Планы на двоих 2×3</string>
+    <string name="widget_description_2x3">2×3: Дни вместе, свидание и событие</string>
+    <string name="widget_label_2x4">Планы на двоих 2×4</string>
+    <string name="widget_description_2x4">2×4: Дни вместе, свидание и событие</string>
+    <string name="widget_label_3x3">Планы на двоих 3×3</string>
+    <string name="widget_description_3x3">3×3: Дни вместе, свидание и событие</string>
+    <string name="widget_label_3x4">Планы на двоих 3×4</string>
+    <string name="widget_description_3x4">3×4: Дни вместе, свидание и событие</string>
+    <string name="widget_label_4x4">Планы на двоих 4×4</string>
+    <string name="widget_description_4x4">4×4: Дни вместе, свидание и событие</string>
 </resources>

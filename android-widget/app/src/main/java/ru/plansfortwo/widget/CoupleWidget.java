@@ -41,16 +41,22 @@ public class CoupleWidget extends AppWidgetProvider {
     }
     @Override public void onDisabled(Context c) {
         super.onDisabled(c);
-        WidgetSyncJob.cancel(c);
+        if(!hasWidgets(c))WidgetSyncJob.cancel(c);
     }
     @Override public void onAppWidgetOptionsChanged(Context c, AppWidgetManager m, int id, Bundle opts) {
         super.onAppWidgetOptionsChanged(c,m,id,opts);
         render(c,m,id);
     }
+    static boolean hasWidgets(Context c) {
+        AppWidgetManager m=AppWidgetManager.getInstance(c);
+        for(WidgetCatalog.Size s:WidgetCatalog.ALL)
+            if(m.getAppWidgetIds(new ComponentName(c,s.provider)).length>0)return true;
+        return false;
+    }
     static void redrawAll(Context c) {
-        AppWidgetManager m = AppWidgetManager.getInstance(c);
-        int[] ids = m.getAppWidgetIds(new ComponentName(c,CoupleWidget.class));
-        for (int id : ids) render(c,m,id);
+        AppWidgetManager m=AppWidgetManager.getInstance(c);
+        for(WidgetCatalog.Size s:WidgetCatalog.ALL)
+            for(int id:m.getAppWidgetIds(new ComponentName(c,s.provider)))render(c,m,id);
     }
     static String telegramPackage(Context c) {
         PackageManager pm = c.getPackageManager();
@@ -74,8 +80,12 @@ public class CoupleWidget extends AppWidgetProvider {
     static void render(Context c, AppWidgetManager manager, int id) {
         SharedPreferences p=Api.prefs(c);
         Bundle opts=manager.getAppWidgetOptions(id);
-        int width=opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,140);
-        int height=opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,56);
+        android.appwidget.AppWidgetProviderInfo info=manager.getAppWidgetInfo(id);
+        WidgetCatalog.Size size=WidgetCatalog.find(info==null?"":info.provider.getClassName());
+        int width=opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,size.width);
+        int height=opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,size.height);
+        if(width<=0)width=size.width;
+        if(height<=0)height=size.height;
         width=Math.max(110,Math.min(440,width));
         height=Math.max(48,Math.min(440,height));
         int cols=width<=160?2:width<=245?3:4;
@@ -156,6 +166,9 @@ final class WidgetArt {
         Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);p.setColor(col);p.setStrokeWidth(1);c.drawLine(x1,y1,x2,y2,p);
     }
     static Bitmap draw(Context ctx,SharedPreferences p,JSONObject data,int wdp,int hdp,String mode) {
+        return draw(ctx,p,data,wdp,hdp,mode,null,0);
+    }
+    static Bitmap draw(Context ctx,SharedPreferences p,JSONObject data,int wdp,int hdp,String mode,String overrideKey,int overrideColor) {
         DisplayMetrics metrics=ctx.getResources().getDisplayMetrics(); float den=metrics.density;
         int wpx=Math.min(1152,Math.max(1,Math.round(wdp*den))),hpx=Math.min(1152,Math.max(1,Math.round(hdp*den)));
         Bitmap bmp=Bitmap.createBitmap(wpx,hpx,Bitmap.Config.ARGB_8888);
@@ -164,6 +177,10 @@ final class WidgetArt {
         int bg2=color(p,"bg2",Color.rgb(48,79,141));
         int text=color(p,"text",Color.WHITE);
         int icon=color(p,"icon",Color.rgb(255,154,186));
+        if("bg1".equals(overrideKey))bg1=overrideColor;
+        if("bg2".equals(overrideKey))bg2=overrideColor;
+        if("text".equals(overrideKey))text=overrideColor;
+        if("icon".equals(overrideKey))icon=overrideColor;
         int alpha=Math.max(0,Math.min(100,p.getInt("alpha",90)));
         int a=Math.round(alpha*2.55f);
         Paint back=new Paint(Paint.ANTI_ALIAS_FLAG);
