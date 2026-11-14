@@ -51,22 +51,23 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
         prefs=Api.prefs(this);
+        LinearLayout screen=new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setBackgroundColor(DARK);
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(DARK);
-        body=new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(18),dp(22),dp(18),dp(42));
-        scroll.addView(body);
-        setContentView(scroll);
-
-        title("♥  Планы на двоих",26);
-        note("Оформи виджет, затем размести подходящий размер на рабочем столе.");
-        section("Подключение");
-        status=note("");
-        button("Привязать Telegram",v->connect());
-        button("Проверить привязку и обновить",v->refresh(true));
-
+        LinearLayout scrollBody=new LinearLayout(this);
+        scrollBody.setOrientation(LinearLayout.VERTICAL);
+        scrollBody.setPadding(dp(18),dp(12),dp(18),dp(42));
+        scroll.addView(scrollBody);
+        LinearLayout fixed=new LinearLayout(this);
+        fixed.setOrientation(LinearLayout.VERTICAL);
+        fixed.setPadding(dp(18),dp(8),dp(18),0);
+        screen.addView(fixed,new LinearLayout.LayoutParams(-1,-2));
+        screen.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        setContentView(screen);
+        body=fixed;
+        title("♥  Планы на двоих",24);
         section("Предпросмотр на рабочем столе");
         previewNote=note("");
         FrameLayout frame=new FrameLayout(this);
@@ -77,9 +78,14 @@ public class MainActivity extends Activity {
         preview.setAdjustViewBounds(false);
         preview.setPadding(dp(12),dp(16),dp(12),dp(16));
         frame.addView(preview,new FrameLayout.LayoutParams(-1,-1));
-        LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(-1,dp(235));
-        fp.setMargins(0,dp(6),0,dp(10));
+        LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(-1,dp(200));
+        fp.setMargins(0,dp(4),0,dp(6));
         body.addView(frame,fp);
+        body=scrollBody;
+        section("Подключение");
+        status=note("");
+        button("Привязать Telegram",v->connect());
+        button("Проверить привязку и обновить",v->refresh(true));
         note("Размер для предпросмотра (высота × ширина)");
         String[] names=new String[WidgetCatalog.ALL.length];
         for(int i=0;i<names.length;i++)names[i]=WidgetCatalog.ALL[i].title();
