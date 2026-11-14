@@ -339,7 +339,12 @@ public class MainActivity extends Activity {
         // Use the provider's previewLayout rather than custom bitmap RemoteViews.
         // Its ComponentName already identifies the selected grid size.
         try{
-            boolean accepted=manager.requestPinAppWidget(provider,null,null);
+            Intent confirmation=new Intent(this,CoupleWidget.class)
+                .setAction(CoupleWidget.ACTION_PIN_SUCCEEDED);
+            android.app.PendingIntent callback=android.app.PendingIntent.getBroadcast(
+                this,40001,confirmation,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT|android.app.PendingIntent.FLAG_IMMUTABLE);
+            boolean accepted=manager.requestPinAppWidget(provider,null,callback);
             if(!accepted)toast("Не удалось открыть добавление виджета через One UI.");
         }catch(RuntimeException error){
             toast("Не удалось открыть добавление виджета. Добавь его через рабочий стол.");
