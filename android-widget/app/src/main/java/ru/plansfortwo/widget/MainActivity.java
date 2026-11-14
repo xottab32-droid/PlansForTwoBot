@@ -45,6 +45,7 @@ public class MainActivity extends Activity {
     private int previewColorValue;
     private boolean ready=false, pickerDirty=false;
     private LinearLayout connectionScreen, settingsScreen;
+    private ScrollView settingsScroll;
     private boolean returningFromTelegram=false, verifying=false;
     private int wallpaperStyle=0;
     private static final int DARK=Color.rgb(18,23,39);
@@ -73,10 +74,11 @@ public class MainActivity extends Activity {
         screen.setOrientation(LinearLayout.VERTICAL);
         screen.setBackgroundColor(DARK);
         ScrollView scroll=new ScrollView(this);
+        settingsScroll=scroll;
         scroll.setFillViewport(true);
         LinearLayout scrollBody=new LinearLayout(this);
         scrollBody.setOrientation(LinearLayout.VERTICAL);
-        scrollBody.setPadding(dp(18),dp(12),dp(18),dp(42));
+        scrollBody.setPadding(dp(18),dp(12),dp(18),dp(18));
         scroll.addView(scrollBody);
         LinearLayout fixed=new LinearLayout(this);
         fixed.setOrientation(LinearLayout.VERTICAL);
@@ -115,17 +117,25 @@ public class MainActivity extends Activity {
             sampleWallpaper.invalidate();
         });
 
-        section("Оформление");
+        // Bottom navigation is a sibling of the scroll content, so it never scrolls away.
         LinearLayout nav=new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
-        body.addView(nav,new LinearLayout.LayoutParams(-1,dp(53)));
+        nav.setPadding(dp(8),dp(5),dp(8),dp(6));
+        nav.setBackgroundColor(Color.rgb(28,33,52));
+        View separator=new View(this);
+        separator.setBackgroundColor(Color.rgb(63,70,96));
+        screen.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));
+        screen.addView(nav,new LinearLayout.LayoutParams(-1,dp(62)));
         String[] navNames={"Фон","Текст / значки","Прозрачность"};
         for(int i=0;i<3;i++){
             final int index=i;
             Button tab=new Button(this);
             tab.setText(navNames[i]);
             tab.setAllCaps(false);tab.setTextSize(14);
-            tab.setOnClickListener(v->showPanel(index));
+            tab.setOnClickListener(v->{
+                showPanel(index);
+                settingsScroll.scrollTo(0,0);
+            });
             nav.addView(tab,new LinearLayout.LayoutParams(0,-1,1));
             tabs[i]=tab;
         }
