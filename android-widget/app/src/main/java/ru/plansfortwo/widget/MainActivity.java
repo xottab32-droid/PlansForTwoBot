@@ -336,29 +336,11 @@ public class MainActivity extends Activity {
         // The size-specific provider defines targetCellWidth and targetCellHeight
         // so the launcher can offer the exact grid span shown in the preview.
         ComponentName provider=new ComponentName(this,size.provider);
-        JSONObject data=snapshot();
-        if(data.optString("relationship_start").isEmpty())data=WidgetCatalog.demo();
-        RemoteViews pinPreview=new RemoteViews(getPackageName(),size.layout);
-        // Keep the bitmap under Binder's transaction size while preserving
-        // the exact aspect ratio, data and visual styling of the selection.
-        android.graphics.Bitmap image=WidgetArt.draw(this,prefs,data,size.width,size.height,size.mode);
-        final int maxSide=420;
-        int longest=Math.max(image.getWidth(),image.getHeight());
-        if(longest>maxSide){
-            float ratio=maxSide/(float)longest;
-            android.graphics.Bitmap scaled=android.graphics.Bitmap.createScaledBitmap(image,
-                Math.max(1,Math.round(image.getWidth()*ratio)),
-                Math.max(1,Math.round(image.getHeight()*ratio)),true);
-            if(scaled!=image){image.recycle();image=scaled;}
-        }
-        pinPreview.setImageViewBitmap(R.id.bg,image);
-        Bundle extras=new Bundle();
-        extras.putParcelable(AppWidgetManager.EXTRA_APPWIDGET_PREVIEW,pinPreview);
+        // Use the provider's previewLayout rather than custom bitmap RemoteViews.
+        // Its ComponentName already identifies the selected grid size.
         try{
-            boolean accepted=manager.requestPinAppWidget(provider,extras,null);
-            if(!accepted)toast("Не удалось открыть добавление виджета. Попробуй через меню виджетов One UI.");
-            // accepted means only that the launcher received the request, not that
-            // the user confirmed. The provider's onUpdate renders after placement.
+            boolean accepted=manager.requestPinAppWidget(provider,null,null);
+            if(!accepted)toast("Не удалось открыть добавление виджета через One UI.");
         }catch(RuntimeException error){
             toast("Не удалось открыть добавление виджета. Добавь его через рабочий стол.");
         }
