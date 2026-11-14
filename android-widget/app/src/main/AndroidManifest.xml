@@ -6,7 +6,7 @@
         <package android:name="org.telegram.messenger" />
         <package android:name="org.telegram.messenger.web" />
     </queries>
-    <application android:allowBackup="false" android:label="Планы на двоих" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+    <application android:allowBackup="false" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:label="Планы на двоих" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
