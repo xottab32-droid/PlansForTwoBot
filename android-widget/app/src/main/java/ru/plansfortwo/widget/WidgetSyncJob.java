@@ -9,6 +9,16 @@ import android.content.Context;
 
 public class WidgetSyncJob extends JobService {
     private static final int JOB_ID = 201114;
+    private static final int MANUAL_JOB_ID = 201115;
+    /** JobScheduler avoids long network requests inside a broadcast receiver. */
+    static boolean requestManual(Context c) {
+        JobScheduler scheduler=(JobScheduler)c.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+        if(scheduler==null)return false;
+        JobInfo info=new JobInfo.Builder(MANUAL_JOB_ID,new ComponentName(c,WidgetSyncJob.class))
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+            .setOverrideDeadline(10_000L).build();
+        return scheduler.schedule(info)==JobScheduler.RESULT_SUCCESS;
+    }
     static void schedule(Context c) {
         JobScheduler scheduler = (JobScheduler)c.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if(scheduler==null)return;
@@ -25,10 +35,11 @@ public class WidgetSyncJob extends JobService {
     }
     @Override public boolean onStartJob(JobParameters params) {
         if(Api.prefs(this).getString("token","").isEmpty())return false;
+        boolean manual=params.getJobId()==MANUAL_JOB_ID;
         new Thread(()->{
-            try { Api.fetch(getApplicationContext(),false); } catch(Exception ignored) { }
+            try { Api.fetch(getApplicationContext(),manual); } catch(Exception ignored) { }
             try { CoupleWidget.redrawAll(getApplicationContext()); } finally { jobFinished(params,false); }
-        },"widget-daily-sync").start();
+        },manual?"widget-manual-sync":"widget-daily-sync").start();
         return true;
     }
     @Override public boolean onStopJob(JobParameters params) {return true;}

@@ -14,6 +14,21 @@ final class Api {
     private static final String ENDPOINT = "https://ccqbxfspjmlzizzznsuz.supabase.co/functions/v1/plans-widget";
     static final long DAY = 24L * 60L * 60L * 1000L;
     static final Object LOCK = new Object();
+    private static final String MANUAL_KEY = "last_manual_request_ms";
+    private static final long MANUAL_INTERVAL_MS = 60_000L;
+    /** Reserve a single manual refresh across the app and every widget. Returns wait seconds, 0 when allowed. */
+    static synchronized int reserveManual(Context c) {
+        SharedPreferences p=prefs(c);
+        long now=System.currentTimeMillis(),last=p.getLong(MANUAL_KEY,0L);
+        if(last>0 && now-last<MANUAL_INTERVAL_MS) {
+            long remaining=MANUAL_INTERVAL_MS-Math.max(0L,now-last);
+            return (int)((remaining+999L)/1000L);
+        }
+        return p.edit().putLong(MANUAL_KEY,now).commit()?0:-1;
+    }
+    static synchronized void undoManualReservation(Context c) {
+        prefs(c).edit().remove(MANUAL_KEY).apply();
+    }
     private Api() {}
     static SharedPreferences prefs(Context c) { return c.getApplicationContext().getSharedPreferences("couple_widget", Context.MODE_PRIVATE); }
     static String randomHex(int bytes) {

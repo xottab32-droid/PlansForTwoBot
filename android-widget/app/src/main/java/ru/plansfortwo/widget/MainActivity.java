@@ -375,6 +375,12 @@ public class MainActivity extends Activity {
         },"widget-register").start();
     }
     private void refresh(boolean force){
+        if(force){
+            if(prefs.getString("token","").isEmpty()){toast("Сначала подключи Telegram");return;}
+            int wait=Api.reserveManual(this);
+            if(wait>0){toast("Обновить снова можно через "+wait+" сек.");return;}
+            if(wait<0){toast("Не удалось запустить обновление");return;}
+        }
         status.setText("Проверяю подключение и данные…");
         new Thread(()->{
             try{

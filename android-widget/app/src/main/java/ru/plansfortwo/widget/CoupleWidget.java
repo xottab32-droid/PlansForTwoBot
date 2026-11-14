@@ -21,6 +21,7 @@ import android.os.Bundle;
 import android.util.DisplayMetrics;
 import android.view.View;
 import android.widget.RemoteViews;
+import android.widget.Toast;
 import org.json.JSONObject;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -30,6 +31,30 @@ import java.util.Locale;
 
 public class CoupleWidget extends AppWidgetProvider {
     static final String BOT = "PlansForTwoBot";
+    private static final String ACTION_REFRESH = "ru.plansfortwo.widget.REFRESH_NOW";
+
+    @Override public void onReceive(Context context, Intent intent) {
+        if(intent!=null && ACTION_REFRESH.equals(intent.getAction())) {
+            Context c=context.getApplicationContext();
+            if(Api.prefs(c).getString("token","").isEmpty()) {
+                Toast.makeText(c,"Сначала подключи Telegram",Toast.LENGTH_SHORT).show();
+                return;
+            }
+            int wait=Api.reserveManual(c);
+            if(wait>0) {
+                Toast.makeText(c,"Обновить снова можно через "+wait+" сек.",Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if(wait<0 || !WidgetSyncJob.requestManual(c)) {
+                if(wait==0)Api.undoManualReservation(c);
+                Toast.makeText(c,"Не удалось запустить обновление",Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Toast.makeText(c,"Обновление запрошено",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        super.onReceive(context,intent);
+    }
 
     @Override public void onUpdate(Context context, AppWidgetManager manager, int[] ids) {
         for (int id : ids) render(context, manager, id);
@@ -113,6 +138,10 @@ public class CoupleWidget extends AppWidgetProvider {
             rv.setOnClickPendingIntent(R.id.tap1,telegram);
             rv.setOnClickPendingIntent(R.id.tap2,telegram);
         }
+        Intent refreshIntent=new Intent(c,CoupleWidget.class).setAction(ACTION_REFRESH);
+        PendingIntent refresh=PendingIntent.getBroadcast(c,30000+id,refreshIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        rv.setOnClickPendingIntent(R.id.refreshHit,refresh);
         manager.updateAppWidget(id,rv);
     }
 }
@@ -242,6 +271,27 @@ final class WidgetArt {
             centered(c,event==null?"—":d2,text,Math.min(21,hdp*.095f),true,wdp*.75f,hdp*.79f,wdp*.47f);
             centered(c,left2,text,Math.min(12,hdp*.055f),false,wdp*.75f,hdp*.88f,wdp*.47f);
         }
+        drawRefreshBadge(c,wdp,hdp);
         return bmp;
+    }
+    /** Corner indicator; its 34dp touch target is provided in each widget layout. */
+    private static void drawRefreshBadge(Canvas c,float width,float height){
+        float radius=9f,cx=width-17f,cy=height-17f;
+        Paint back=new Paint(Paint.ANTI_ALIAS_FLAG);
+        back.setColor(Color.argb(220,42,43,67));
+        c.drawCircle(cx,cy,radius+3f,back);
+        Paint line=new Paint(Paint.ANTI_ALIAS_FLAG);
+        line.setColor(Color.WHITE);
+        line.setStyle(Paint.Style.STROKE);
+        line.setStrokeWidth(1.7f);
+        RectF oval=new RectF(cx-radius*.58f,cy-radius*.58f,cx+radius*.58f,cy+radius*.58f);
+        c.drawArc(oval,40f,285f,false,line);
+        line.setStyle(Paint.Style.FILL);
+        android.graphics.Path arrow=new android.graphics.Path();
+        arrow.moveTo(cx+radius*.44f,cy+radius*.25f);
+        arrow.lineTo(cx+radius*.94f,cy+radius*.32f);
+        arrow.lineTo(cx+radius*.75f,cy-radius*.24f);
+        arrow.close();
+        c.drawPath(arrow,line);
     }
 }
